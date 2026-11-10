@@ -6,8 +6,10 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
 import { PackageReader } from "../io/PackageReader.js";
-import { createStaticBuffer } from "../graphics/BufferUtils.js";
+import { createDynamicBuffer, createStaticBuffer } from "../graphics/BufferUtils.js";
+import { loadTextFont, rasterizeText, sizeTextTexture } from "../graphics/TextRasterizer.js";
 import { collectIncludeNames } from "../parser/ShaderIncludes.js";
+import { PuppetAnimator, fillPuppetArrays } from "./PuppetAnimator.js";
 import { SceneModel } from "./SceneModel.js";
 import { TexParser } from "../parser/TexParser.js";
 function numberLines(source) {
@@ -16,6 +18,27 @@ function numberLines(source) {
         .split("\n")
         .map((line, index) => `${index + 1}: ${line}`)
         .join("\n");
+}
+// Scene values bound to a project property ({"user": "name", "value": baked}) follow that property's current value; the baked one is only what the editor last saw.
+function applyUserProperties(node, properties) {
+    if (Array.isArray(node)) {
+        for (const item of node) {
+            applyUserProperties(item, properties);
+        }
+        return;
+    }
+    if (!node || typeof node !== "object") {
+        return;
+    }
+    const name = typeof node.user === "string" ? node.user : node.user?.name;
+    if (name !== undefined && "value" in node && properties.has(name)) {
+        const property = properties.get(name);
+        const condition = node.user?.condition;
+        node.value = condition === undefined ? property : String(property) === String(condition);
+    }
+    for (const child of Object.values(node)) {
+        applyUserProperties(child, properties);
+    }
 }
 const VIDEO_SIGNATURE_SAMPLES = 16;
 const VIDEO_SIGNATURE_SAMPLE_BYTES = 8;
@@ -31,7 +54,9 @@ function videoSignature(data) {
 }
 export class SceneLoader {
     #graphics;
+    #assetRoot = null;
     #entries = new Map();
+    #fonts = new Map();
     #videos = new Map();
     constructor(graphics) {
         this.#graphics = graphics;
@@ -41,15 +66,23 @@ export class SceneLoader {
             return await this.#load(packageSource, sceneFile, assetRoot, isCancelled);
         }
         finally {
+            this.#assetRoot = null;
             this.#entries = new Map();
+            this.#fonts = new Map();
             this.#videos = new Map();
         }
     }
     async #load(packageSource, sceneFile, assetRoot, isCancelled) {
+        this.#assetRoot = assetRoot;
         const pkg = await this.readPackage(packageSource, sceneFile);
+        const properties = await this.readUserProperties(packageSource);
+        if (properties.size) {
+            applyUserProperties(pkg.scene, properties);
+        }
         await this.loadExternalTextures(pkg, assetRoot);
         // Must complete before SceneModel/MaterialParser compile any shader (ShaderParser.compile is synchronous).
         await this.loadExternalShaders(pkg, assetRoot);
+        await this.loadDefaultTextures(pkg, assetRoot);
         this.#entries = pkg.entries;
         if (isCancelled()) {
             return null;
@@ -61,17 +94,40 @@ export class SceneLoader {
         const sceneModel = new SceneModel(pkg);
         const layers = sceneModel.createLayers();
         if (!layers.length) {
-            throw new Error(`Scene texture format is not supported (${packageSource})`);
+            // A 3D scene is made of mesh models with a perspective camera, none of which this 2D renderer draws.
+            const is3D = pkg.scene.objects?.some(object => object.model);
+            throw new Error(is3D
+                ? `Scene is 3D, which is not supported (${packageSource})`
+                : `Scene has no drawable layer (${packageSource})`);
         }
         if (isCancelled()) {
             return null;
         }
-        const preparedLayers = await this.prepareLayers(layers, isCancelled);
+        const preparedLayers = await this.prepareLayers(layers, isCancelled, sceneModel.captureSize);
         if (!preparedLayers) {
             return null;
         }
         const preparedParticles = await this.prepareParticles(sceneModel.particles);
-        return { sceneModel, layers: preparedLayers, particles: preparedParticles };
+        const userProperties = {};
+        for (const [name, value] of properties) {
+            if (["number", "boolean", "string"].includes(typeof value)) {
+                userProperties[name] = value;
+            }
+        }
+        return { sceneModel, layers: preparedLayers, particles: preparedParticles, userProperties };
+    }
+    async readUserProperties(packageSource) {
+        const properties = new Map();
+        try {
+            const project = JSON.parse(new TextDecoder().decode(new Uint8Array(await this.fetchPackage(new URL("project.json", packageSource).href))));
+            for (const [name, property] of Object.entries(project.general?.properties ?? {})) {
+                if (property && property.value !== undefined && property.type !== "scenetexture") {
+                    properties.set(name, property.value);
+                }
+            }
+        }
+        catch { }
+        return properties;
     }
     async loadExternalTextures(pkg, assetRoot) {
         if (!assetRoot) {
@@ -87,6 +143,32 @@ export class SceneLoader {
             }
             catch { }
         }
+        await this.fetchTextures(pkg, names, assetRoot);
+    }
+    // A shader can name a stock texture as the default of a sampler (`"default":"util/noise"`) without any material mentioning it.
+    async loadDefaultTextures(pkg, assetRoot) {
+        if (!assetRoot) {
+            return;
+        }
+        const names = new Set();
+        const decoder = new TextDecoder();
+        for (const [path, content] of pkg.entries) {
+            if (!/^shaders\/.*\.(?:frag|vert)$/i.test(path)) {
+                continue;
+            }
+            for (const match of decoder.decode(content).matchAll(/uniform\s+sampler2D\s+g_Texture\d+\s*;\s*\/\/\s*(\{.+\})/g)) {
+                try {
+                    const name = JSON.parse(match[1]).default;
+                    if (typeof name === "string" && name && !name.startsWith("_") && !name.toLowerCase().endsWith(".tex")) {
+                        names.add(name);
+                    }
+                }
+                catch { }
+            }
+        }
+        await this.fetchTextures(pkg, names, assetRoot);
+    }
+    async fetchTextures(pkg, names, assetRoot) {
         await Promise.all([...names].map(async (name) => {
             const normalized = name.replaceAll("\\", "/").replace(/^\/+/, "");
             if (normalized.split("/").includes("..")) {
@@ -228,7 +310,7 @@ export class SceneLoader {
         }
         return null;
     }
-    async prepareLayers(layers, isCancelled) {
+    async prepareLayers(layers, isCancelled, captureSize) {
         // Only the awaits (image decoding) overlap. Every GL call sits in a
         // synchronous stretch that binds what it needs, and each layer owns
         // its own texture cache, so interleaving layers is safe.
@@ -236,10 +318,28 @@ export class SceneLoader {
             if (isCancelled()) {
                 return null;
             }
+            if (layer.text) {
+                await this.prepareText(layer);
+            }
             const preparedLayer = {
                 ...layer,
                 ...(await this.uploadTexture(layer.texture)),
             };
+            if (layer.passthrough) {
+                // It filters the scene capture instead of a texture of its own.
+                [preparedLayer.width, preparedLayer.height] = captureSize;
+                [preparedLayer.textureWidth, preparedLayer.textureHeight] = captureSize;
+                preparedLayer.u = 1;
+                preparedLayer.v = 1;
+            }
+            if (layer.texture.extraPixels) {
+                const { flags, width, height } = layer.texture;
+                const extras = layer.texture.extraPixels.splice(0);
+                preparedLayer.imageTextures = [
+                    preparedLayer.glTexture,
+                    ...extras.map(extra => this.#graphics.textures.upload({ ...extra, flags, width, height }).glTexture),
+                ];
+            }
             delete preparedLayer.texture;
             this.preparePuppet(preparedLayer);
             await this.prepareMaterialPasses(preparedLayer);
@@ -249,6 +349,47 @@ export class SceneLoader {
             return null;
         }
         return preparedLayers;
+    }
+    // Renders the layer's first string into its texture; SceneRenderer redraws it when the string changes.
+    async prepareText(layer) {
+        const state = layer.text;
+        let font = this.#fonts.get(state.font);
+        if (!font) {
+            font = loadTextFont(state.font, name => this.readFont(name));
+            this.#fonts.set(state.font, font);
+        }
+        ({ face: state.face, family: state.family } = await font);
+        sizeTextTexture(state, layer.scale, layer.renderPasses.length ? 1 : 2);
+        const pixels = rasterizeText(state);
+        state.dirty = false;
+        state.resized = false;
+        layer.size = [state.box[0] + 2 * state.margin[0], state.box[1] + 2 * state.margin[1]];
+        layer.texture = {
+            flags: 2,
+            format: 0,
+            height: state.pixelHeight,
+            pixels,
+            textureHeight: state.pixelHeight,
+            textureWidth: state.pixelWidth,
+            type: "pixels",
+            width: state.pixelWidth,
+        };
+    }
+    async readFont(name) {
+        const normalized = name.replaceAll("\\", "/").replace(/^\/+/, "");
+        const entry = this.findEntry(this.#entries, normalized);
+        if (entry) {
+            return entry;
+        }
+        if (!this.#assetRoot || normalized.split("/").includes("..")) {
+            return null;
+        }
+        try {
+            return new Uint8Array(await this.fetchPackage(new URL(normalized, this.#assetRoot).href));
+        }
+        catch {
+            return null;
+        }
     }
     async prepareParticles(particles) {
         return Promise.all(particles.map(async (particle) => {
@@ -265,23 +406,30 @@ export class SceneLoader {
             return;
         }
         const gl = this.#graphics.gl;
-        const width = layer.size[0] || 1;
-        const height = layer.size[1] || 1;
         const positions = new Float32Array(layer.puppet.positions.length);
         const effectPositions = new Float32Array(layer.puppet.positions.length * 1.5);
+        // Where each vertex landed inside the first pass's render target: the final draw samples it there, not at the mesh's atlas UVs.
+        const outputTexCoords = new Float32Array(layer.puppet.positions.length);
         // layer.puppet.positions[y] already carries MdlParser's Y-down flip; do not re-negate here or the mesh renders upside down.
-        for (let index = 0; index < positions.length; index += 2) {
-            positions[index] = layer.puppet.positions[index] / width;
-            positions[index + 1] = layer.puppet.positions[index + 1] / height;
-            const effectIndex = (index / 2) * 3;
-            effectPositions[effectIndex] = width / 2 + layer.puppet.positions[index];
-            effectPositions[effectIndex + 1] =
-                height / 2 + layer.puppet.positions[index + 1];
-            effectPositions[effectIndex + 2] = 0;
+        fillPuppetArrays(layer, layer.puppet.positions, positions, effectPositions, outputTexCoords);
+        const skeleton = layer.puppet.skeleton;
+        const animator = skeleton
+            ? new PuppetAnimator(skeleton, layer.animationLayers)
+            : null;
+        const createBuffer = animator?.active ? createDynamicBuffer : createStaticBuffer;
+        if (animator?.active) {
+            layer.puppetAnimation = {
+                animator,
+                skinned: new Float32Array(layer.puppet.positions.length),
+                positions,
+                effectPositions,
+                outputTexCoords,
+            };
         }
-        layer.puppetPositionBuffer = createStaticBuffer(gl, positions);
-        layer.puppetEffectPositionBuffer = createStaticBuffer(gl, effectPositions);
+        layer.puppetPositionBuffer = createBuffer(gl, positions);
+        layer.puppetEffectPositionBuffer = createBuffer(gl, effectPositions);
         layer.puppetTexCoordBuffer = createStaticBuffer(gl, layer.puppet.texCoords);
+        layer.puppetOutputTexCoordBuffer = createBuffer(gl, outputTexCoords);
         layer.puppetIndexBuffer = createStaticBuffer(gl, layer.puppet.indices, gl.ELEMENT_ARRAY_BUFFER);
         layer.puppetIndexCount = layer.puppet.indices.length;
     }

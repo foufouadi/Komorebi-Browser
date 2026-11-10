@@ -6,6 +6,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
 import { SHADER_INCLUDE_PATTERN } from "./ShaderIncludes.js";
+import { repairShaderTypes } from "./ShaderTypeRepair.js";
 // "commands/copy" is not a real shipped WE asset: it's the engine's own built-in passthrough shader for effect "copy" commands.
 const COMMANDS_COPY_SOURCE = {
     frag: "uniform sampler2D g_Texture0;\n" +
@@ -50,7 +51,11 @@ export class ShaderParser {
             const max = sizeOf.get(name) ?? 0;
             return max > Number(size) ? `varying vec${max} ${name}` : fullMatch;
         });
-        return { vertex: promote(vertex), fragment: promote(fragment) };
+        // Varying sizes are final only now, and the type repair needs them.
+        return {
+            vertex: repairShaderTypes(promote(vertex), "vert"),
+            fragment: repairShaderTypes(promote(fragment), "frag"),
+        };
     }
     resolveCombos(shader, configured, textures) {
         let source = "";
@@ -106,26 +111,30 @@ export class ShaderParser {
         source = this.#renameShadowedBuiltins(source);
         source = this.#truncateVectorArguments(source);
         source = this.#reorderScalarVectorMinMax(source);
-        source = this.#reconcileVectorAssignments(source);
         source = this.#splitCompoundForCondition(source);
         source = this.#normalizeVectorConstructors(source);
         source = this.#constifyLoopBounds(source);
-        source = this.#coerceIntFloatArithmetic(source);
+        // A shader may redefine a constant its #include'd header already defines; GLSL ES rejects a differing redefinition.
+        source = source.replace(/^([ \t]*)#define[ \t]+(\w+)\b(?!\()/gm, "$1#undef $2\n#define $2");
         const defines = Object.entries(discoveredCombos)
             .map(([name, value]) => `#define ${name.toUpperCase()} ${Number(value) || 0}`)
             .join("\n");
-        // WE shaders freely use fwidth/ddx/ddy (screen-space derivatives),
-        // which are core in HLSL but gated behind GL_OES_standard_derivatives
-        // in GLSL ES 1.00 ("no matching overloaded function" without it). The
-        // extension directive must precede any non-preprocessor statement
-        // (including "precision"), and is near-universally supported in
-        // WebGL1, so it's cheap to always declare on fragment shaders rather
-        // than parse the source to see if it's actually needed.
+        // Effect shaders are authored for desktop GL/HLSL. GLSL ES 3.00 (WebGL2) provides what they rely on and ES 1.00 lacks: array constructors, dynamic loop bounds and indexing, inverse(), `%` and core derivatives. The legacy keywords go through macros so the sources stay untouched.
         const header = [
-            ...(extension === "frag"
-                ? ["#extension GL_OES_standard_derivatives : enable"]
-                : []),
+            "#version 300 es",
             "precision highp float;",
+            "precision highp int;",
+            "#define attribute in",
+            extension === "frag" ? "#define varying in" : "#define varying out",
+            ...(extension === "frag"
+                ? [
+                    "layout(location = 0) out highp vec4 weFragColor;",
+                    "#define gl_FragColor weFragColor",
+                ]
+                : []),
+            "#define texture2D texture",
+            "#define texSample2D texture",
+            "#define texSample2DLod textureLod",
             "#define mul(x, y) ((y) * (x))",
             "#define lerp mix",
             "#define frac fract",
@@ -140,8 +149,6 @@ export class ShaderParser {
             "#define int3 ivec3",
             "#define int4 ivec4",
             "#define saturate(x) clamp(x, 0.0, 1.0)",
-            "#define texSample2D texture2D",
-            "#define texSample2DLod texture2D",
             "#define atan2 atan",
             "#define ddx dFdx",
             "#define ddy(x) dFdy(-(x))",
@@ -268,15 +275,6 @@ export class ShaderParser {
         // only the simplest `max(0, x.rgb)` shape.
         return source.replace(/\b(min|max)\(\s*(-?\d+(?:\.\d+)?(?:e[+-]?\d+)?)\s*,\s*([^,()]+)\)/g, "$1($3, $2)");
     }
-    // HLSL allows two more implicit vector conversions GLSL ES rejects:
-    // (1) assigning a scalar to a vector variable broadcasts it to every
-    //     component (`vec2 strength = g_Strength * 60;` fills both x and y);
-    // (2) a compound-assignment operator (/=, *=, ...) implicitly truncates a
-    //     larger vector operand to the target's size (`vec2 s; s /=
-    //     g_Texture0Resolution /* vec4 */;` uses just .xy). Both need to know
-    //     each identifier's declared component count, so this builds that
-    //     table first (from uniform/varying/attribute/local `vecN` decls)
-    //     before rewriting.
     // Splits `text` on `separator` at paren-depth 0 only, so a declarator
     // list like `radial = 0.0, tangential = 0.0, center = (g_center - 0.5)`
     // splits into 3 declarators instead of getting confused by the comma
@@ -305,92 +303,6 @@ export class ShaderParser {
         parts.push(current);
         return parts;
     }
-    #reconcileVectorAssignments(source) {
-        const sizeOf = new Map();
-        for (const match of source.matchAll(/\b(?:uniform|varying|attribute)\s+vec([234])\s+(\w+)/g)) {
-            sizeOf.set(match[2], Number(match[1]));
-        }
-        // GLSL allows multiple comma-separated declarators sharing one type,
-        // each with its own optional initializer:
-        // `vec2 radial = 0.0, tangential = 0.0, center = (g_center - 0.5);`
-        // or with no initializer at all: `vec2 neighbor, p, diff, pos;`.
-        // Excluding "{" from what can be consumed is required: without it, a
-        // FUNCTION returning a vecN (`vec3 Foo(vec3 x) { const float a = 1.0;
-        // ... }`, no "=" before its "{") looks just like the start of a
-        // declarator list, and "up to the next ;" swallows the whole function
-        // signature plus the first statement of its body — corrupting it (a
-        // real regression this caused: see docs/lacunes-connues.md history).
-        const localDeclaration = /\bvec([234])\s+([^;{]+);/g;
-        for (const match of source.matchAll(localDeclaration)) {
-            const size = Number(match[1]);
-            for (const declarator of this.#splitTopLevel(match[2], ",")) {
-                const name = declarator.trim().match(/^(\w+)/);
-                if (name) {
-                    sizeOf.set(name[1], size);
-                }
-            }
-        }
-        if (!sizeOf.size) {
-            return source;
-        }
-        const swizzle = (count) => "xyzw".slice(0, count);
-        const isVectorLooking = (expression) => /\bvec[234]\s*\(/.test(expression) ||
-            /\.[xyzwrgba]{2,4}\b/.test(expression) ||
-            [...expression.matchAll(/\b(\w+)\b/g)].some(token => sizeOf.has(token[1]));
-        // texSample2D/texture2D always return vec4 in GLSL (regardless of the
-        // source texture's actual channel count), and WE shaders commonly
-        // assign the result straight into a vec2/vec3 (discarding the rest,
-        // e.g. `vec3 albedo = texSample2D(...)`), relying on HLSL's implicit
-        // truncation on assignment. Checked before the generic isVectorLooking
-        // broadcast path below, since a texture call already "looks vector"
-        // (it has a nested swizzle like `.xy` in its own arguments) and would
-        // otherwise be left alone unchanged instead of truncated.
-        const textureCallSize = 4;
-        source = source.replace(localDeclaration, (fullMatch, size, declList) => {
-            const declarators = this.#splitTopLevel(declList, ",").map(part => {
-                const equals = part.indexOf("=");
-                if (equals === -1) {
-                    return part;
-                }
-                const name = part.slice(0, equals).trim();
-                const expression = part.slice(equals + 1).trim();
-                if (Number(size) < textureCallSize &&
-                    /^(?:texSample2D|texSample2DLod|texture2D)\(/.test(expression)) {
-                    return `${name} = (${expression}).${swizzle(Number(size))}`;
-                }
-                return isVectorLooking(expression)
-                    ? part
-                    : `${name} = vec${size}(${expression})`;
-            });
-            return `vec${size} ${declarators.join(", ")};`;
-        });
-        source = source.replace(/\b(\w+)\s*(\/=|\*=|\+=|-=)\s*(\w+)\s*;/g, (fullMatch, lhs, operator, rhs) => {
-            const lhsSize = sizeOf.get(lhs);
-            const rhsSize = sizeOf.get(rhs);
-            if (!lhsSize || !rhsSize || rhsSize <= lhsSize) {
-                return fullMatch;
-            }
-            return `${lhs} ${operator} ${rhs}.${swizzle(lhsSize)};`;
-        });
-        // Same HLSL-truncates-the-larger-operand rule, but for a plain binary
-        // +/- between two differently-sized vectors instead of an assignment
-        // (`v_TexCoord - CAST2(u_offset)`, vec3 minus vec2). CAST2/3/4(...) are
-        // this file's own always-vecN macros, so their size is known without
-        // needing to track a declared variable.
-        const operandSize = (expression) => Number(expression.match(/^CAST([234])\(/)?.[1]) ||
-            sizeOf.get(expression.trim());
-        source = source.replace(/\b(\w+)\s*([+-])\s*(CAST[234]\([^()]*\)|\w+)/g, (fullMatch, lhs, operator, rhs) => {
-            const lhsSize = sizeOf.get(lhs);
-            const rhsSize = operandSize(rhs);
-            if (!lhsSize || !rhsSize || lhsSize === rhsSize) {
-                return fullMatch;
-            }
-            return lhsSize > rhsSize
-                ? `${lhs}.${swizzle(rhsSize)} ${operator} ${rhs}`
-                : `${lhs} ${operator} (${rhs}).${swizzle(lhsSize)}`;
-        });
-        return source;
-    }
     #normalizeVectorConstructors(source) {
         source = source.replace(/(\d+(?:\.\d+)?)f\b/g, "$1");
         source = source.replace(/\b(vec[234])\(([^()\r\n]*)\)/g, (_match, type, values) => {
@@ -398,7 +310,7 @@ export class ShaderParser {
             return `${type}(${normalized})`;
         });
         source = source.replace(/([*/]\s*)(\d+)(?![\d.])/g, (_match, operator, value) => `${operator}${value}.0`);
-        source = source.replace(/(?<![\w.])(\d+)(\s*[*/])/g, (_match, value, operator) => `${value}.0${operator}`);
+        source = source.replace(/(?<![\w.])(?<![eE][+-])(\d+)(\s*[*/])/g, (_match, value, operator) => `${value}.0${operator}`);
         source = source.replace(/(\bfloat\s+\w+\s*=\s*)(-?\d+)(\s*;)/g, (_match, prefix, value, suffix) => `${prefix}${value}.0${suffix}`);
         source = source.replace(
         // Was scoped to an identifier/paren-led right-hand side only, missing
@@ -430,42 +342,6 @@ export class ShaderParser {
         })
             .join("\n");
     }
-    // WE ships shaders written against HLSL, which implicitly promotes int to
-    // float in mixed arithmetic (e.g. `float x = intVar - 1;`). GLSL ES 1.00
-    // rejects that outright ("wrong operand types"). Rather than a full type
-    // checker, this targets the actual failing idiom: identifiers declared
-    // `int`/`const int` (including for-loop counters) that later sit directly
-    // next to +,-,*,/ get wrapped in float(...). Declaration/comparison sites
-    // (`int i = 0`, `i < count`, `++i`) are untouched since the name there
-    // isn't adjacent to a binary arithmetic operator.
-    #coerceIntFloatArithmetic(source) {
-        const intNames = new Set();
-        for (const match of source.matchAll(/\b(?:const\s+)?int\s+(\w+)\s*=/g)) {
-            intNames.add(match[1]);
-        }
-        for (const match of source.matchAll(/\bfor\s*\(\s*int\s+(\w+)\b/g)) {
-            intNames.add(match[1]);
-        }
-        if (!intNames.size) {
-            return source;
-        }
-        const alternation = [...intNames]
-            .map(name => name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
-            .join("|");
-        // Single-letter loop counters (i, x, y, z...) are exactly the names
-        // GLSL also uses for swizzle components (.x, .y, .rgb, ...). Without
-        // excluding anything preceded by "." here, `Q.x - min(...)` gets
-        // corrupted into `Q.float(x) - min(...)` — a real regression this
-        // caused (see docs/lacunes-connues.md / session history: `worley()`'s
-        // `for (int x ...)`/`for (int y ...)` polluted every `.x`/`.y` swizzle
-        // in the whole file, since tracking here is file-wide, not scoped to
-        // the loop's body). Same story for `y++`/`x--` (the for-loop's own
-        // increment clause): `float(y)++` is not an l-value, so `++`/`--` must
-        // be excluded from the "followed by an operator" lookahead too.
-        source = source.replace(new RegExp(`(?<!\\.)\\b(${alternation})\\b(?=\\s*[+\\-*/])(?!\\s*(\\+\\+|--))`, "g"), "float($1)");
-        source = source.replace(new RegExp(`(?<=[+\\-*/]\\s)(?<!\\.\\s)\\b(${alternation})\\b`, "g"), "float($1)");
-        return source;
-    }
     #preprocessConditionals(source, configured) {
         const macros = { ...configured };
         const stack = [];
@@ -485,7 +361,9 @@ export class ShaderParser {
                 }
                 continue;
             }
-            const [, type, expression] = directive;
+            const [, type] = directive;
+            // A trailing comment would otherwise make the whole condition evaluate false.
+            const expression = directive[2].replace(/\/\/.*$|\/\*.*?\*\//g, "").trim();
             if (type === "if" || type === "ifdef" || type === "ifndef") {
                 const condition = type === "ifdef"
                     ? macros[expression] !== undefined

@@ -21,11 +21,12 @@ export const FULLSCREEN_VERTICES = new Float32Array([
     1.0, -1.0, 0.0,
     1.0, 1.0, 0.0,
 ]);
+// Render targets keep the uploaded-texture convention (image top at t=0), and the clip-space bottom row is t=0, so the bottom-left vertex samples (0,0). A pass reading the previous pass with (0,1) there would mirror the image once per extra pass.
 export const FULLSCREEN_UVS = new Float32Array([
-    0.0, 1.0,
-    1.0, 1.0,
     0.0, 0.0,
-    0.0, 0.0,
-    1.0, 1.0,
     1.0, 0.0,
+    0.0, 1.0,
+    0.0, 1.0,
+    1.0, 0.0,
+    1.0, 1.0,
 ]);

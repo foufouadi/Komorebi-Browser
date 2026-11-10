@@ -12,6 +12,8 @@ const TEX_FORMAT = {
     DXT1: 7,
 };
 const LZ4_BULK_COPY_BYTES = 64;
+// Atlas images past the first are only decoded while their RGBA size stays under this; a long GIF can span dozens of 8K images.
+const EXTRA_IMAGE_BUDGET = 640 * 1024 * 1024;
 export class TexParser {
     bytes;
     view;
@@ -59,6 +61,7 @@ export class TexParser {
         }
         const mipmapVersion = version === 4 && imageFormat !== 35 ? 3 : version;
         const images = [];
+        let extraBytes = 0;
         for (let imageIndex = 0; imageIndex < imageCount; imageIndex++) {
             const mipmapCount = this.readUint32();
             if (!mipmapCount) {
@@ -85,9 +88,19 @@ export class TexParser {
                     throw new Error("Invalid texture mipmap length");
                 }
                 const data = this.readBytes(byteLength);
-                const blocks = compressed
-                    ? this.decompressLZ4(data, decompressedLength)
-                    : data;
+                let usable = true;
+                if (imageIndex > 0) {
+                    // Only the base level of an extra image is ever used.
+                    usable = mipmapIndex === 0 && extraBytes + mipWidth * mipHeight * 4 <= EXTRA_IMAGE_BUDGET;
+                    if (usable) {
+                        extraBytes += mipWidth * mipHeight * 4;
+                    }
+                }
+                const blocks = !usable
+                    ? new Uint8Array(0)
+                    : compressed
+                        ? this.decompressLZ4(data, decompressedLength)
+                        : data;
                 mipmaps.push({ data: blocks, height: mipHeight, width: mipWidth });
             }
             images.push(mipmaps);
@@ -117,7 +130,7 @@ export class TexParser {
                 images,
             };
             result.spriteSheet =
-                flags & 4 ? this.readSpriteSheet(textureWidth, textureHeight) : null;
+                flags & 4 ? this.readSpriteSheet(primary.width, primary.height) : null;
             return result;
         }
         const result = {
@@ -131,8 +144,33 @@ export class TexParser {
             type: "pixels",
             width,
         };
+        // Frame rectangles are in pixels of the stored atlas, whatever the header's texture size says (an animated GIF's header carries the frame size).
         result.spriteSheet =
-            flags & 4 ? this.readSpriteSheet(textureWidth, textureHeight) : null;
+            flags & 4 ? this.readSpriteSheet(primary.width, primary.height) : null;
+        // A frame names the atlas image it lives in; large GIFs span several.
+        const decodedImages = images.filter(mipmaps => mipmaps[0].data.length).length;
+        let usableImages = decodedImages;
+        if (result.spriteSheet?.frames.some(frame => frame.imageIndex > 0)) {
+            const extras = [];
+            for (const mipmaps of images.slice(1, decodedImages)) {
+                try {
+                    extras.push({
+                        pixels: this.decodePixels(format, mipmaps[0].width, mipmaps[0].height, mipmaps[0].data),
+                        textureHeight: mipmaps[0].height,
+                        textureWidth: mipmaps[0].width,
+                    });
+                }
+                catch {
+                    break;
+                }
+            }
+            result.extraPixels = extras;
+            usableImages = 1 + extras.length;
+        }
+        if (result.spriteSheet && usableImages < images.length) {
+            const frames = result.spriteSheet.frames.filter(frame => frame.imageIndex < usableImages);
+            result.spriteSheet = frames.length ? { frames } : null;
+        }
         return result;
     }
     isMP4(data) {
@@ -154,11 +192,12 @@ export class TexParser {
                 return null;
             }
             const count = this.readUint32();
-            let sheetWidth = textureWidth;
-            let sheetHeight = textureHeight;
+            const sheetWidth = textureWidth;
+            const sheetHeight = textureHeight;
             if (version === "TEXS0003") {
-                sheetWidth = this.readUint32();
-                sheetHeight = this.readUint32();
+                // The recorded size is that of one frame, not of the atlas.
+                this.readUint32();
+                this.readUint32();
             }
             if (!count ||
                 count > 10000 ||
@@ -206,6 +245,7 @@ export class TexParser {
                     bottom: translation[1] + rotation[3],
                     duration: Math.max(duration, 1 / 60),
                     frameNumber,
+                    imageIndex: frameNumber,
                     left: translation[0],
                     right: translation[0] + rotation[0],
                     rotation,
@@ -241,7 +281,7 @@ export class TexParser {
             if (data.length !== expectedLength) {
                 throw new Error(`Invalid RGBA texture size: ${data.length}/${expectedLength}`);
             }
-            return new Uint8ClampedArray(data);
+            return new Uint8ClampedArray(data.buffer, data.byteOffset, data.length);
         }
         if (format === 8 || format === 9) {
             return this.decodeChannels(format === 8 ? 2 : 1, width, height, data);

@@ -13,6 +13,7 @@ export const SCENE_VERTEX_SHADER = `
     uniform vec2 uProjection;
     uniform float uRotation;
     uniform vec2 uSceneScale;
+    uniform float uFlipY;
     uniform vec2 uSize;
 
     void main() {
@@ -27,7 +28,7 @@ export const SCENE_VERTEX_SHADER = `
         worldPosition.x / uProjection.x * 2.0 - 1.0,
         1.0 - worldPosition.y / uProjection.y * 2.0
       );
-      gl_Position = vec4(clipPosition * uSceneScale, 0.0, 1.0);
+      gl_Position = vec4(clipPosition * uSceneScale * vec2(1.0, uFlipY), 0.0, 1.0);
       vTexCoord = aTexCoord;
     }
   `;

@@ -25,6 +25,9 @@ export class FrameScheduler {
         }
         return this.#drawTimes.length / (FPS_WINDOW_MS / 1000);
     }
+    get running() {
+        return this.#animationFrame !== null;
+    }
     setMaxFPS(maxFPS) {
         this.#minInterval = maxFPS > 0 ? 1000 / maxFPS : 0;
     }

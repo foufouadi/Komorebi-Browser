@@ -52,13 +52,13 @@ export class CanvasViewport {
         return canvas;
     }
     #createContext(canvas) {
-        const gl = canvas.getContext("webgl", {
+        const gl = canvas.getContext("webgl2", {
             alpha: true,
             antialias: false,
             premultipliedAlpha: true,
         });
         if (!gl) {
-            throw new Error("WebGL is not available");
+            throw new Error("WebGL 2 is not available");
         }
         return gl;
     }

@@ -20,8 +20,6 @@ export class GraphicsContext {
     #attribLocations = new WeakMap();
     constructor(gl) {
         this.gl = gl;
-        // WebGL1 needs this requested from JS too, not just declared in shader source, or fwidth/dFdx/dFdy report unsupported.
-        gl.getExtension("OES_standard_derivatives");
         this.programs = new ProgramCache(gl);
         this.textures = new TextureUploader(gl);
         this.whiteTexture = this.#createWhiteTexture();

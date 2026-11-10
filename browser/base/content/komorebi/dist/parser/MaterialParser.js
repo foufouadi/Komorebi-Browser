@@ -16,15 +16,15 @@ export class MaterialParser {
         this.#shaders = new ShaderParser(entries);
     }
     resolveEffects(effects = []) {
-        return effects
-            .filter(effect => {
+        return effects.flatMap((effect, effectIndex) => {
             const visible = effect.visible;
-            return (visible !== false &&
-                !(typeof visible === "object" &&
-                    visible !== null &&
-                    visible.value === false));
-        })
-            .flatMap(effect => this.resolveEffect(effect));
+            if (visible === false ||
+                (typeof visible === "object" && visible !== null && visible.value === false)) {
+                return [];
+            }
+            // Scripts address an effect by its place in the object's list.
+            return this.resolveEffect(effect).map(pass => ({ ...pass, effectIndex }));
+        });
     }
     resolveEffect(effect) {
         const definition = this.readJSON(effect.file);

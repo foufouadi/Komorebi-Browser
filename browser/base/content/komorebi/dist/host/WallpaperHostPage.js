@@ -5,6 +5,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
+import { ImageRenderer } from "../../komorebi-image-renderer.js";
 import { VideoRenderer } from "../../komorebi-video-renderer.js";
 import { SceneRenderer } from "../renderer/SceneRenderer.js";
 const STYLE = `
@@ -17,14 +18,14 @@ html, body {
 [hidden] {
     display: none !important;
 }
-canvas, video {
+canvas, video, img {
     position: fixed;
     inset: 0;
     width: 100%;
     height: 100%;
     display: block;
 }
-#komorebi-container {
+#komorebi-container, #komorebi-image-container {
     position: fixed;
     inset: 0;
     width: 100%;
@@ -46,6 +47,7 @@ const pendingReads = new Map();
 const shown = {
     scene: { pageActive: true, visible: false },
     video: { pageActive: true, visible: false },
+    image: { pageActive: true, visible: false },
 };
 let nextReadId = 1;
 let fpsTimer = null;
@@ -98,9 +100,11 @@ style.textContent = STYLE;
 document.head.append(style);
 const scene = new SceneRenderer();
 const video = new VideoRenderer();
-const renderers = { scene, video };
+const image = new ImageRenderer();
+const renderers = { scene, video, image };
 scene.init({ audioPlayer });
 video.init();
+image.init();
 function reportFps() {
     send({
         type: "fps",

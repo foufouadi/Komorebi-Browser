@@ -342,6 +342,69 @@
   background: color-mix(in srgb, var(--color-accent-primary) 16%, var(--background-color-box));
 }
 
+.komorebi-onb-sources {
+  display: grid;
+  gap: var(--space-medium);
+  align-self: stretch;
+  width: min(100%, 560px);
+  margin-inline: auto;
+}
+
+.komorebi-onb-source {
+  display: grid;
+  gap: var(--space-small);
+  padding: var(--space-large);
+  border: var(--border-width) solid var(--color-accent-primary);
+  border-radius: var(--border-radius-large);
+  background: color-mix(in srgb, var(--color-accent-primary) 12%, var(--background-color-box));
+  text-align: start;
+  transition:
+    background-color var(--komorebi-duration-fast) var(--komorebi-ease),
+    border-color var(--komorebi-duration) var(--komorebi-ease);
+
+  &.off {
+    border-color: var(--border-color);
+    background: var(--background-color-box);
+  }
+}
+
+.komorebi-onb-source-label {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: var(--space-large);
+
+  & input {
+    margin: 3px 0 0;
+    accent-color: var(--color-accent-primary);
+  }
+}
+
+.komorebi-onb-source-text {
+  display: grid;
+  gap: 2px;
+}
+
+.komorebi-onb-source-name {
+  font-size: var(--font-size-large);
+}
+
+.komorebi-onb-source-profile {
+  justify-self: start;
+  margin-inline-start: calc(16px + var(--space-large));
+  font: inherit;
+}
+
+.komorebi-onb-source-warning {
+  margin: 0;
+  margin-inline-start: calc(16px + var(--space-large));
+  color: var(--text-color-warning, var(--text-color-deemphasized));
+}
+
+.komorebi-onb-import-status:empty {
+  display: none;
+}
+
 .komorebi-onb-footer {
   display: grid;
   grid-template-columns: 1fr auto 1fr;

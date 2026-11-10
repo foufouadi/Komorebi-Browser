@@ -2,9 +2,9 @@
 
 > An experimental Firefox fork with animated wallpapers behind your tabs.
 
-Komorebi runs Wallpaper Engine scenes and video wallpapers behind the browser
-interface and web pages. Scenes are not converted to video: their assets are
-parsed and rendered directly in the browser.
+Komorebi runs Wallpaper Engine scenes, videos and your own images behind the
+browser interface and web pages. Scenes are not converted to video: their
+assets, effects and scripts are parsed and rendered directly in the browser.
 
 ## Demo
 
@@ -18,7 +18,10 @@ and run it. It installs for the current user, with no administrator rights, and
 adds a desktop shortcut.
 
 The installer is not signed, so Windows SmartScreen may warn you the first time.
-Komorebi does not update itself: install a newer release over the old one.
+
+Komorebi updates itself from its settings: it downloads the new
+release, checks it and reinstalls over the same folder, keeping your profile.
+Version 0.1.0 has no updater, so install the next release over it once by hand.
 
 Windows x64 only.
 
@@ -26,16 +29,24 @@ Windows x64 only.
 
 ### Wallpapers
 
-- Video wallpapers and Wallpaper Engine scenes
+- Wallpaper Engine scenes, video wallpapers, and your own images and videos
+  (drop them on the library or use Add file)
 - Automatic detection of wallpapers from the Steam Workshop
-- Library with search, tags, favorites and folders
+- Library with search, tags, favorites, folders, and sorting by date or name
+- Scene effects compiled with WebGL2, including most Workshop shaders
+- Composition layers, text layers, sprite sheets, particles and puppet
+  skeletons
+- Scene scripts (SceneScript), run in an isolated sandbox with no network or
+  browser access
 - Per-wallpaper settings, and scene music with its own volume
 - Guided first launch to choose a wallpaper
 
 ### Browser
 
 - Wallpaper visible behind the Home page, New Tab and Google results
-- Readable Google results on translucent blocks, with adjustable opacity
+- Readable Google results on translucent blocks, with adjustable opacity; the
+  Firefox background when the wallpaper is turned off for search
+- Import of your bookmarks, history and other data from Chrome or Firefox
 - Spaces to group tabs
 - Compact mode that hides the toolbar until needed
 - Unloading of tabs you have not used for a while
@@ -49,20 +60,19 @@ Windows x64 only.
 
 ## Known limitations
 
-- `web` and `application` Wallpaper Engine projects are not supported.
-- Scene effects that need WebGL2 (GLSL ES 3.00) are not supported.
-- No audio-reactive effects.
-- No skeletal animation for puppet-warp meshes.
-- No automatic camera projection or parallax.
+- `web` and `application` Wallpaper Engine projects, presets of another
+  wallpaper, and 3D scenes are not supported.
+- No audio-reactive effects: audio bars and pulses stay still.
+- A wallpaper's own options (clock format, colors...) use their defaults and
+  cannot be changed yet.
+- Mouse interaction, parallax and camera shake are new and not yet checked on
+  every wallpaper. Particles do not follow the mouse.
+- A few Workshop shaders still fail to compile, and some effects drawn on part
+  of the screen leave rectangles.
+- Importing from Firefox restarts the browser into the Firefox import wizard.
 - The Google styling depends on Google's page structure, so some result pages
   can look wrong until it is adapted.
 - Web page contents cannot blur the wallpaper behind them.
-
-## Build from source
-
-Install [MozillaBuild](https://firefox-source-docs.mozilla.org/setup/), then
-run `./mach build` and `./mach run`. For changes to Komorebi's front-end files,
-`./mach build faster` is enough.
 
 ## License
 

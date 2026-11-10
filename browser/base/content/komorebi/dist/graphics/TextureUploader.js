@@ -13,6 +13,19 @@ export class TextureUploader {
     constructor(gl) {
         this.#gl = gl;
     }
+    /** Overwrites the texels of an uploaded texture; `resize` reallocates it for a new size. */
+    update(glTexture, pixels, width, height, resize = false) {
+        const gl = this.#gl;
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, glTexture);
+        gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+        if (resize) {
+            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+        }
+        else {
+            gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+        }
+    }
     upload(texture) {
         const gl = this.#gl;
         const glTexture = gl.createTexture();
@@ -23,11 +36,7 @@ export class TextureUploader {
         gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
         const flags = texture.flags ?? TEX_FLAG_CLAMP_UVS;
         const nearest = Boolean(flags & TEX_FLAG_NO_INTERPOLATION);
-        // WebGL1 only allows REPEAT on power-of-two textures; anything else
-        // must fall back to CLAMP_TO_EDGE or the texture becomes incomplete.
-        const isPowerOfTwo = (value) => value > 0 && (value & (value - 1)) === 0;
-        const canRepeat = isPowerOfTwo(texture.textureWidth) && isPowerOfTwo(texture.textureHeight);
-        const wrap = flags & TEX_FLAG_CLAMP_UVS || !canRepeat ? gl.CLAMP_TO_EDGE : gl.REPEAT;
+        const wrap = flags & TEX_FLAG_CLAMP_UVS ? gl.CLAMP_TO_EDGE : gl.REPEAT;
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, nearest ? gl.NEAREST : gl.LINEAR);
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, nearest ? gl.NEAREST : gl.LINEAR);
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, wrap);

@@ -13,12 +13,25 @@ const TEXTURE_SLOTS = 8;
 const TEXTURE_SAMPLER_NAMES = Array.from({ length: TEXTURE_SLOTS }, (_, index) => `g_Texture${index}`);
 const TEXTURE_RESOLUTION_NAMES = TEXTURE_SAMPLER_NAMES.map(name => `${name}Resolution`);
 const TEXTURE_UNIFORM = /^g_Texture\d+(?:Resolution)?$/;
+const MATRIX_UNIFORMS = [
+    "g_ModelViewProjectionMatrix",
+    "g_EffectModelViewProjectionMatrix",
+    "g_ModelMatrix",
+    "g_EffectModelMatrix",
+];
+// The same quad as the pixel-space one, after the orthographic projection.
+const CLIP_QUAD = new Float32Array([-1, 1, 0, 1, 1, 0, -1, -1, 0, -1, -1, 0, 1, 1, 0, 1, -1, 0]);
 export class EffectRenderer {
     #graphics;
     #animatedValues = new WeakMap();
     #activePasses = new WeakMap();
     #parsedStrings = new Map();
     #uniformPlans = new WeakMap();
+    #targetStates = new WeakMap();
+    #lastElapsed = new WeakMap();
+    #matrixPasses = new WeakMap();
+    #frametime = 1 / 60;
+    #blackTexture = null;
     #copyPositionBuffer;
     #copyTexCoordBuffer;
     constructor(graphics) {
@@ -34,14 +47,39 @@ export class EffectRenderer {
         }
         this.#copyTexCoordBuffer = texCoordBuffer;
     }
-    run(layer, elapsed, pointer, projection) {
+    // `input` replaces the layer's own texture: a composition layer filters the scene captured so far.
+    run(layer, elapsed, pointer, projection, input = null) {
         const passes = this.#passesOf(layer);
         if (!passes.length) {
             return layer.glTexture;
         }
         const gl = this.#graphics.gl;
-        const targets = new Map();
-        let previous = this.#renderTexture(layer);
+        const last = this.#lastElapsed.get(layer);
+        this.#frametime = last === undefined ? 1 / 60 : Math.min(0.1, Math.max(0, elapsed - last));
+        this.#lastElapsed.set(layer, elapsed);
+        // Named targets outlive a frame: simulation effects (cursor ripples) read the buffer their last pass wrote on the previous frame.
+        let state = this.#targetStates.get(layer);
+        if (!state) {
+            state = {
+                targets: new Map(),
+                written: new Set(passes.map(pass => pass.target).filter(Boolean)),
+            };
+            this.#targetStates.set(layer, state);
+        }
+        const { targets, written } = state;
+        let previous = input
+            ? {
+                texture: input,
+                width: layer.width,
+                height: layer.height,
+                textureWidth: layer.width,
+                textureHeight: layer.height,
+            }
+            : this.#renderTexture(layer);
+        const sheetFrame = layer.imageTextures ? currentFrame(layer.frames, elapsed * 1000, 0) : null;
+        if (sheetFrame?.imageIndex) {
+            previous.texture = layer.imageTextures[sheetFrame.imageIndex] ?? previous.texture;
+        }
         // Snapshot of `previous` before each WE effect's own pass chain starts, used by binds that never get an explicit target (e.g. "_rt_imageLayerComposite_<id>_a/_b").
         let effectInput = previous;
         for (let passIndex = 0; passIndex < passes.length; passIndex++) {
@@ -58,7 +96,7 @@ export class EffectRenderer {
             this.#setPassState(pass);
             const positionBuffer = firstPass
                 ? (layer.puppetEffectPositionBuffer ??
-                    this.#prepareCopyPositionBuffer(layer.width, layer.height))
+                    this.#prepareCopyPositionBuffer(layer.width, layer.height, Boolean(layer.text) && !this.#usesMatrix(pass)))
                 : this.#graphics.screenQuad.positionBuffer;
             this.#bindPassAttribute(pass.program, "a_Position", positionBuffer, 3);
             const texCoordBuffer = firstPass && layer.puppetTexCoordBuffer
@@ -73,7 +111,7 @@ export class EffectRenderer {
                 const source = bind === "previous"
                     ? previous
                     : bind !== undefined
-                        ? (targets.get(bind) ?? effectInput)
+                        ? (targets.get(bind) ?? (written.has(bind) ? this.#emptyTexture() : effectInput))
                         : (this.#resolvedTexture(pass.resolvedTextures?.get(index)) ??
                             (index === 0 ? previous : this.#whiteTexture()));
                 gl.activeTexture(gl.TEXTURE0 + index);
@@ -96,16 +134,20 @@ export class EffectRenderer {
                 gl.drawArrays(gl.TRIANGLES, 0, 6);
             }
             if (pass.outputTexture) {
-                previous = {
+                const output = {
                     texture: pass.outputTexture,
                     width: pass.outputWidth ?? layer.width,
                     height: pass.outputHeight ?? layer.height,
                     textureWidth: pass.outputWidth ?? layer.width,
                     textureHeight: pass.outputHeight ?? layer.height,
                 };
-            }
-            if (pass.target) {
-                targets.set(pass.target, previous);
+                // A pass that renders into a named target leaves the image flow alone: "previous" keeps meaning the last untargeted result (godrays' final pass blends its rays onto it).
+                if (pass.target) {
+                    targets.set(pass.target, output);
+                }
+                else {
+                    previous = output;
+                }
             }
         }
         gl.depthMask(true);
@@ -121,9 +163,23 @@ export class EffectRenderer {
         gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0, v, u, v, 0, 0, 0, 0, u, v, u, 0]), gl.STREAM_DRAW);
         return this.#copyTexCoordBuffer;
     }
-    #prepareCopyPositionBuffer(width, height) {
+    // Only text layers take this for now: on image layers it removes the partial-quad artifacts but leaves some areas black, which is still unexplained.
+    // A first pass whose vertex shader ignores the projection matrices (a custom blur that writes a_Position straight to gl_Position) needs the quad already in clip space.
+    #usesMatrix(pass) {
+        let uses = this.#matrixPasses.get(pass);
+        if (uses === undefined) {
+            uses = MATRIX_UNIFORMS.some(name => this.#graphics.uniform(pass.program, name) !== null);
+            this.#matrixPasses.set(pass, uses);
+        }
+        return uses;
+    }
+    #prepareCopyPositionBuffer(width, height, clipSpace = false) {
         const gl = this.#graphics.gl;
         gl.bindBuffer(gl.ARRAY_BUFFER, this.#copyPositionBuffer);
+        if (clipSpace) {
+            gl.bufferData(gl.ARRAY_BUFFER, CLIP_QUAD, gl.STREAM_DRAW);
+            return this.#copyPositionBuffer;
+        }
         gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
             0,
             height,
@@ -158,6 +214,27 @@ export class EffectRenderer {
     #resolvedTexture(texture) {
         return texture ? this.#renderTexture(texture) : undefined;
     }
+    // Never-written simulation state starts out as transparent black.
+    #emptyTexture() {
+        const gl = this.#graphics.gl;
+        if (!this.#blackTexture) {
+            const texture = gl.createTexture();
+            gl.bindTexture(gl.TEXTURE_2D, texture);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(4));
+            this.#blackTexture = {
+                texture,
+                width: 1,
+                height: 1,
+                textureWidth: 1,
+                textureHeight: 1,
+            };
+        }
+        return this.#blackTexture;
+    }
     #whiteTexture() {
         return {
             texture: this.#graphics.whiteTexture,
@@ -173,7 +250,8 @@ export class EffectRenderer {
             gl.enable(gl.BLEND);
             gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE, gl.SRC_ALPHA, gl.ONE);
         }
-        else if (pass.blending === "translucent") {
+        // Blending onto a freshly cleared intermediate target would apply alpha twice: once here, once when the layer is composited.
+        else if (pass.blending === "translucent" && !pass.framebuffer) {
             gl.enable(gl.BLEND);
             gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
         }
@@ -209,6 +287,8 @@ export class EffectRenderer {
             let value;
             if (name === "g_Time")
                 value = elapsed;
+            else if (name === "g_Frametime")
+                value = this.#frametime;
             else if (name === "g_Daytime")
                 value = elapsed;
             else if (name === "g_PointerPosition")
@@ -228,8 +308,11 @@ export class EffectRenderer {
             }
             else if (name === "g_Brightness" || name === "g_UserAlpha")
                 value = 1;
-            else if (name === "g_Alpha")
-                value = layer.opacity;
+            else if (name === "g_Alpha") {
+                // An effect's own "alpha" setting wins; the layer's opacity is what applies otherwise.
+                const key = metadata.configuration?.material;
+                value = (key === undefined ? undefined : pass.constants[key]) ?? layer.opacity;
+            }
             else if (name === "g_Color")
                 value = layer.tint;
             else if (name === "g_Color4")

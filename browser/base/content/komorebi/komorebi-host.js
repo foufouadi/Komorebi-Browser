@@ -50,7 +50,7 @@
   const DOCUMENT_POLL_MS = 20;
   const START_TIMEOUT_MS = 30000;
   const MOUSE_INTERVAL_MS = 33;
-  const TARGETS = ["scene", "video"];
+  const TARGETS = ["scene", "video", "image"];
 
   function delay(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
@@ -131,6 +131,7 @@
   class KomorebiWallpaperHost {
     scene = new RendererProxy(this, "scene");
     video = new RendererProxy(this, "video");
+    image = new RendererProxy(this, "image");
     #audio = null;
     #browser = null;
     #destroyed = false;
@@ -142,7 +143,7 @@
     #pending = new Map();
     #ready = false;
     #readyDeferred = null;
-    #roots = { scene: [], video: [] };
+    #roots = { image: [], scene: [], video: [] };
     #starting = null;
 
     constructor() {
@@ -256,7 +257,19 @@
         return [options];
       }
       const file = this.#fileFromURL(options);
-      this.#roots.video = [this.#normalized(file.parent)];
+      if (target === "image") {
+        // A picture is only ever shown from the library's own copy.
+        const media = Cc["@mozilla.org/file/local;1"].createInstance(Ci.nsIFile);
+        media.initWithPath(global.KomorebiMedia.root());
+        this.#normalized(media);
+        this.#normalized(file);
+        if (!media.contains(file)) {
+          throw new Error("Image outside the library");
+        }
+        this.#roots.image = [this.#normalized(file.parent)];
+      } else {
+        this.#roots.video = [this.#normalized(file.parent)];
+      }
       return [await File.createFromNsIFile(file)];
     }
 
@@ -282,9 +295,11 @@
     }
 
     #isAllowed(file) {
-      return [...this.#roots.scene, ...this.#roots.video].some(root =>
-        root.contains(file)
-      );
+      return [
+        ...this.#roots.scene,
+        ...this.#roots.video,
+        ...this.#roots.image,
+      ].some(root => root.contains(file));
     }
 
     async #handleRead({ id, source }) {
@@ -473,7 +488,8 @@
         return;
       }
       const sceneShown = this.#isShown("scene");
-      const anyShown = sceneShown || this.#isShown("video");
+      const anyShown =
+        sceneShown || this.#isShown("video") || this.#isShown("image");
       this.#browser.toggleAttribute(HIDDEN_ATTRIBUTE, !anyShown);
       if (!anyShown) {
         this.scene.state.fps = 0;
@@ -587,7 +603,7 @@
       }
       this.#pending.clear();
       this.#destroyAudio();
-      this.#roots = { scene: [], video: [] };
+      this.#roots = { image: [], scene: [], video: [] };
       this.scene.state.fps = 0;
       this.video.state.fps = 0;
       if (browser) {

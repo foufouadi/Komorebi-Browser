@@ -24,6 +24,16 @@
   const NEWTAB_PREF = "browser.newtabpage.activity-stream.";
   const WIDGET_ID = "komorebi-toolbar-button";
   const SUPPORTED_VIDEO_TYPES = new Set(["mp4", "webm", "ogg", "ogv"]);
+  const SUPPORTED_IMAGE_TYPES = global.KomorebiMedia.IMAGE_TYPES;
+  const MEDIA_FILE_PATTERN = [
+    ...SUPPORTED_IMAGE_TYPES,
+    ...SUPPORTED_VIDEO_TYPES,
+  ]
+    .map(type => `*.${type}`)
+    .join("; ");
+  const NOTICE_MS = 12000;
+  const DELETE_RETRIES = 5;
+  const DELETE_RETRY_MS = 250;
   const FIT_MODES = new Set(["contain", "cover", "stretch"]);
   const POWER_MODES = new Map([
     ["performance", 60],
@@ -102,6 +112,13 @@
   ];
   const COMPACT_PREF = "browser.komorebi.compact";
   const SLEEP_PREF = "browser.komorebi.sleepAfterMinutes";
+  const SORT_PREF = "browser.komorebi.librarySort";
+  const SORT_OPTIONS = [
+    ["recent", "komorebi-sort-recent"],
+    ["oldest", "komorebi-sort-oldest"],
+    ["name", "komorebi-sort-name"],
+    ["favorites", "komorebi-sort-favorites"],
+  ];
   const SLEEP_OPTIONS = [
     ["0", "komorebi-sleep-off"],
     ["15", "komorebi-sleep-15"],
@@ -139,6 +156,7 @@
   let searchInput;
   let typeValue = "all";
   let tagFilter;
+  let sortSelect;
   let favoritesFilter;
   let unsupportedFilter;
   let foldersList;
@@ -157,6 +175,9 @@
   let usageSample = null;
   let usageBusy = false;
   let usageValues;
+  let notice;
+  let noticeTimer = null;
+  let dropDepth = 0;
 
   function getPowerMode() {
     const mode = Services.prefs.getStringPref(
@@ -543,10 +564,11 @@
       // Wallpaper Engine's own exporter isn't consistent about the casing
       // of "type" (seen in the wild: "Scene" as well as "scene"). Every
       // comparison below and in loadProject() is a strict `=== "scene"` /
-      // `=== "video"`, so a capitalized type silently fell through to the
+      // `=== "video"` (and "image"), so a capitalized type silently fell through to the
       // video-fallback path with the scene's own "scene.json" as if it
       // were a video file ("Video request failed (.../scene.json)").
       project.type = (project.type || "").toLowerCase();
+      const { lastModified: addedAt } = await IOUtils.stat(projectPath);
       const extension = (project.file || "")
         .split(/[\\/]/)
         .pop()
@@ -555,6 +577,8 @@
         .toLowerCase();
       const videoSupported =
         project.type === "video" && SUPPORTED_VIDEO_TYPES.has(extension);
+      const imageSupported =
+        project.type === "image" && SUPPORTED_IMAGE_TYPES.has(extension);
       const sceneFile = project.type === "scene" ? project.file : null;
       const expectedPackage = sceneFile?.replace(/\.[^./\\]+$/, ".pkg");
       const packageFiles =
@@ -589,12 +613,15 @@
         id: PathUtils.filename(directory),
         packageFiles: packageFiles.map(path => PathUtils.filename(path)),
         packageIssue,
+        addedAt,
         previewPath,
         scheme: parseSchemeColor(
           project.general?.properties?.schemecolor?.value
         ),
         sceneFile,
-        supported: sceneSupported || (videoSupported && Boolean(filePath)),
+        supported:
+          sceneSupported ||
+          ((videoSupported || imageSupported) && Boolean(filePath)),
         tags: Array.isArray(project.tags) ? project.tags : [],
         title: project.title || PathUtils.filename(directory),
         type: project.type || "unknown",
@@ -647,7 +674,12 @@
 
   async function scanProjects() {
     await steamReady;
-    const scannedProjects = await scanSources([...librarySources]);
+    // The folder of added files is always scanned, whatever the user does
+    // with the folder list.
+    const scannedProjects = await scanSources([
+      ...librarySources,
+      global.KomorebiMedia.root(),
+    ]);
     projects = [
       ...new Map(
         scannedProjects
@@ -692,7 +724,7 @@
         stored &&
         typeof stored.filePath === "string" &&
         typeof stored.directory === "string" &&
-        (stored.type === "scene" || stored.type === "video")
+        ["scene", "video", "image"].includes(stored.type)
       ) {
         return { ...stored, tags: stored.tags || [] };
       }
@@ -741,7 +773,18 @@
       });
       if (applied) {
         renderers.video.setVisible(false);
+        renderers.image.setVisible(false);
         renderers.scene.setVisible(true);
+      }
+      return applied;
+    }
+
+    if (project.type === "image") {
+      const applied = await renderers.image.load(toFileURI(project.filePath));
+      if (applied) {
+        renderers.scene.setVisible(false);
+        renderers.video.setVisible(false);
+        renderers.image.setVisible(true);
       }
       return applied;
     }
@@ -749,6 +792,7 @@
     const applied = await renderers.video.load(toFileURI(project.filePath));
     if (applied) {
       renderers.scene.setVisible(false);
+      renderers.image.setVisible(false);
       renderers.video.setVisible(true);
     }
     return applied;
@@ -809,6 +853,7 @@
   function hideRenderers() {
     renderers.scene.setVisible(false);
     renderers.video.setVisible(false);
+    renderers.image.setVisible(false);
   }
 
   function clearWallpaper() {
@@ -914,6 +959,8 @@
     selectButton.disabled = !project.filePath;
 
     const previewFrame = create("span", "komorebi-wallpaper-preview-frame");
+    previewFrame.classList.toggle("empty", !project.previewPath);
+    previewFrame.dataset.type = project.type;
     if (project.previewPath) {
       const preview = create("img", "komorebi-wallpaper-preview");
       preview.alt = "";
@@ -982,6 +1029,13 @@
     });
 
     card.append(selectButton, favoriteButton);
+    if (global.KomorebiMedia.isMediaDirectory(project.directory)) {
+      const deleteButton = create("button", "komorebi-delete-button");
+      deleteButton.type = "button";
+      document.l10n.setAttributes(deleteButton, "komorebi-delete-media-button");
+      deleteButton.addEventListener("click", () => deleteAddedProject(project));
+      card.appendChild(deleteButton);
+    }
 
     return card;
   }
@@ -1023,9 +1077,10 @@
       setPreview(detailPreview, currentProject);
       document.l10n.setAttributes(
         detailType,
-        currentProject.type === "scene"
-          ? "komorebi-type-scene"
-          : "komorebi-type-video"
+        {
+          image: "komorebi-type-image",
+          scene: "komorebi-type-scene",
+        }[currentProject.type] ?? "komorebi-type-video"
       );
     }
     const count = projects.filter(
@@ -1037,6 +1092,19 @@
         count,
       });
     }
+  }
+
+  function sortProjects(list) {
+    const byName = (a, b) => a.title.localeCompare(b.title);
+    const byRecent = (a, b) => b.addedAt - a.addedAt || byName(a, b);
+    const compare = {
+      oldest: (a, b) => a.addedAt - b.addedAt || byName(a, b),
+      name: byName,
+      favorites: (a, b) =>
+        favorites.has(b.directory) - favorites.has(a.directory) ||
+        byRecent(a, b),
+    }[sortSelect.value];
+    list.sort(compare ?? byRecent);
   }
 
   function renderProjects() {
@@ -1055,6 +1123,7 @@
         (!favoritesFilter.checked || favorites.has(project.directory))
       );
     });
+    sortProjects(visibleProjects);
     const fragment = document.createDocumentFragment();
     for (const project of visibleProjects) {
       fragment.appendChild(createCard(project));
@@ -1116,6 +1185,12 @@
   function openProjectContextMenu(project, event) {
     const menu = document.getElementById("komorebi-project-context-menu");
     menu.komorebiProject = project;
+    document.l10n.setAttributes(
+      menu.querySelector(".komorebi-remove-item"),
+      global.KomorebiMedia.isMediaDirectory(project.directory)
+        ? "komorebi-delete-media"
+        : "komorebi-hide-wallpaper"
+    );
     menu.openPopupAtScreen(event.screenX, event.screenY, true, event);
   }
 
@@ -1134,9 +1209,14 @@
     });
 
     const removeItem = document.createXULElement("menuitem");
+    removeItem.className = "komorebi-remove-item";
     document.l10n.setAttributes(removeItem, "komorebi-hide-wallpaper");
     removeItem.addEventListener("command", () => {
       const project = menu.komorebiProject;
+      if (global.KomorebiMedia.isMediaDirectory(project.directory)) {
+        deleteAddedProject(project);
+        return;
+      }
       hiddenProjects.add(project.directory);
       favorites.delete(project.directory);
       saveHiddenProjects();
@@ -1179,6 +1259,153 @@
     if (!librarySources.some(path => normalizeSourcePath(path) === key)) {
       librarySources.push(picker.file.path);
       saveLibrarySources();
+    }
+    await refresh();
+  }
+
+  function showNotices(entries) {
+    window.clearTimeout(noticeTimer);
+    notice.replaceChildren(
+      ...entries.map(({ args, error, id }) => {
+        const line = create("p", error ? "error" : "");
+        document.l10n.setAttributes(line, id, args);
+        return line;
+      })
+    );
+    notice.hidden = !entries.length;
+    noticeTimer = window.setTimeout(() => {
+      notice.hidden = true;
+    }, NOTICE_MS);
+  }
+
+  /**
+   * Copies files into the library, applies the first one that was added and
+   * tells the user what was added and what was refused, and why.
+   */
+  async function addMedia(items) {
+    const outcome = await global.KomorebiMedia.addFiles(items);
+    const entries = outcome.rejected.map(({ details, name, reason }) => ({
+      args: { name, ...details },
+      error: true,
+      id: `komorebi-media-${reason}`,
+    }));
+    if (outcome.added.length) {
+      entries.unshift({
+        args: { count: outcome.added.length },
+        id: "komorebi-media-added",
+      });
+    }
+    showNotices(entries);
+    if (outcome.added.length) {
+      await refresh();
+      const first = projects.find(
+        project => project.directory === outcome.added[0].directory
+      );
+      if (first) {
+        await applyWallpaper(first);
+      }
+    }
+    return outcome;
+  }
+
+  async function addFiles() {
+    const picker = Cc["@mozilla.org/filepicker;1"].createInstance(
+      Ci.nsIFilePicker
+    );
+    const [title, filter] = await Promise.all([
+      document.l10n.formatValue("komorebi-choose-file-title"),
+      document.l10n.formatValue("komorebi-file-filter-media"),
+    ]);
+    picker.init(
+      window.browsingContext,
+      title,
+      Ci.nsIFilePicker.modeOpenMultiple
+    );
+    picker.appendFilter(filter, MEDIA_FILE_PATTERN);
+    picker.appendFilters(Ci.nsIFilePicker.filterAll);
+    const result = await new Promise(resolve => picker.open(resolve));
+    if (result === Ci.nsIFilePicker.returnCancel) {
+      return;
+    }
+    await addMedia(
+      Array.from(picker.files, file => ({
+        name: file.leafName,
+        path: file.path,
+      }))
+    );
+  }
+
+  function dragHasFiles(event) {
+    return Array.from(event.dataTransfer?.types ?? []).includes("Files");
+  }
+
+  function setDropState(dropping) {
+    dropDepth = dropping ? dropDepth : 0;
+    dialog.classList.toggle("dropping", dropping);
+  }
+
+  function onDrop(event) {
+    event.preventDefault();
+    setDropState(false);
+    const items = Array.from(event.dataTransfer.files, file => ({
+      file,
+      name: file.name,
+      path: file.mozFullPath || undefined,
+    }));
+    if (items.length) {
+      addMedia(items).catch(error =>
+        console.error("Komorebi could not add the dropped files", error)
+      );
+    }
+  }
+
+  function bindDropTarget(target) {
+    target.addEventListener("dragenter", event => {
+      if (dragHasFiles(event)) {
+        event.preventDefault();
+        dropDepth++;
+        setDropState(true);
+      }
+    });
+    target.addEventListener("dragover", event => {
+      if (dragHasFiles(event)) {
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "copy";
+      }
+    });
+    target.addEventListener("dragleave", event => {
+      if (dragHasFiles(event)) {
+        dropDepth = Math.max(0, dropDepth - 1);
+        setDropState(dropDepth > 0);
+      }
+    });
+    target.addEventListener("drop", event => {
+      if (dragHasFiles(event)) {
+        onDrop(event);
+      }
+    });
+  }
+
+  async function deleteAddedProject(project) {
+    if (currentProject?.directory === project.directory) {
+      // Also releases the host's hold on the file.
+      removeWallpaper();
+    }
+    favorites.delete(project.directory);
+    saveFavorites();
+    for (let attempt = 1; ; attempt++) {
+      try {
+        await global.KomorebiMedia.remove(project.directory);
+        break;
+      } catch (error) {
+        if (attempt === DELETE_RETRIES) {
+          console.error("Komorebi could not delete the added file", error);
+          break;
+        }
+        await new Promise(resolve =>
+          window.setTimeout(resolve, DELETE_RETRY_MS)
+        );
+      }
     }
     await refresh();
   }
@@ -1508,6 +1735,7 @@
     const settings = getVideoSettings();
     renderers.scene.updateSettings(settings);
     renderers.video.updateSettings(settings);
+    renderers.image.updateSettings(settings);
     const root = document.documentElement;
     root.toggleAttribute("komorebi-mirror", settings.mirror);
     if (settings.filter === "none") {
@@ -1623,6 +1851,7 @@
         ["all", "komorebi-all-types"],
         ["video", "komorebi-video-type"],
         ["scene", "komorebi-scene-type"],
+        ["image", "komorebi-image-type"],
       ],
       () => typeValue,
       value => {
@@ -1637,6 +1866,17 @@
     tagFilter.className = "komorebi-select";
     document.l10n.setAttributes(tagFilter, "komorebi-tag-filter");
     tagFilter.addEventListener("change", renderProjects);
+
+    sortSelect = createChoiceSelect(
+      SORT_OPTIONS,
+      () => readChoice(SORT_PREF, SORT_OPTIONS.map(([value]) => value), "recent"),
+      value => {
+        Services.prefs.setStringPref(SORT_PREF, value);
+        renderProjects();
+      },
+      "komorebi-sort-select"
+    );
+    document.l10n.setAttributes(sortSelect, "komorebi-sort-label");
 
     const createChip = (l10nId, kind) => {
       const label = create("label", `komorebi-chip ${kind}`);
@@ -1659,8 +1899,10 @@
       searchField,
       typeSegmented,
       tagFilter,
+      sortSelect,
       favoritesChip.label,
-      unsupportedChip.label
+      unsupportedChip.label,
+      createButton("default", "komorebi-add-file", addFiles)
     );
 
     grid = create("div", "komorebi-wallpaper-grid");
@@ -1672,7 +1914,11 @@
       "komorebi-add-folder",
       addLibrarySource
     );
-    emptyState.append(emptyText, emptyAddButton);
+    emptyState.append(
+      emptyText,
+      createButton("default", "komorebi-add-file", addFiles),
+      emptyAddButton
+    );
 
     const scroller = create("div", "komorebi-wallpaper-scroll");
     scroller.append(welcome, grid, emptyState);
@@ -1705,8 +1951,9 @@
 
   function createFoldersPage() {
     const actions = create("div", "komorebi-actions");
-    actions.appendChild(
-      createButton("primary", "komorebi-add-folder", addLibrarySource)
+    actions.append(
+      createButton("primary", "komorebi-add-folder", addLibrarySource),
+      createButton("default", "komorebi-add-file", addFiles)
     );
     foldersList = create("ul", "komorebi-folders-list komorebi-panel");
     foldersEmpty = createNote("komorebi-folders-empty");
@@ -1865,6 +2112,16 @@
             write: value => Services.prefs.setIntPref(SEARCH_OPACITY_PREF, value),
             format: value => `${value}%`,
           })
+        ),
+        createRow(
+          "komorebi-set-show-search",
+          null,
+          createPrefSwitch(`${NEWTAB_PREF}showSearch`, true)
+        ),
+        createRow(
+          "komorebi-set-compact",
+          "komorebi-set-compact-description",
+          createPrefSwitch(COMPACT_PREF, false)
         )
       ),
       createGroupTitle("komorebi-group-current"),
@@ -1877,6 +2134,78 @@
         )
       )
     );
+  }
+
+  function updateStatusMessage(state, update) {
+    const version = update.version;
+    switch (state.phase) {
+      case "checking":
+        return ["komorebi-update-status-checking"];
+      case "available":
+        return [
+          "komorebi-update-status-available",
+          { latest: state.latest.version, version },
+        ];
+      case "downloading":
+        return [
+          "komorebi-update-status-downloading",
+          { percent: Math.round(state.progress * 100) },
+        ];
+      case "verifying":
+        return ["komorebi-update-status-verifying"];
+      case "installing":
+        return ["komorebi-update-status-installing"];
+      case "error":
+        return [`komorebi-update-error-${state.error}`, { version }];
+      default:
+        return update.updatesEnabled()
+          ? ["komorebi-update-status-current", { version }]
+          : ["komorebi-update-status-dev", { version }];
+    }
+  }
+
+  function createUpdateRow() {
+    const update = global.KomorebiUpdate;
+    const control = create("div", "komorebi-update-control");
+    const progress = document.createElement("progress");
+    progress.max = 1;
+    progress.hidden = true;
+    const checkButton = createButton("default", "komorebi-update-check", () =>
+      update.check()
+    );
+    // Labelled once a release is known: its text needs the version.
+    const installButton = create("button", "komorebi-button primary");
+    installButton.type = "button";
+    installButton.addEventListener("click", () => update.install());
+    installButton.hidden = true;
+    control.append(progress, checkButton, installButton);
+    const row = createRow("komorebi-update-title", null, control);
+    row.description = create("p", "komorebi-row-description");
+    row.querySelector(".komorebi-row-text").appendChild(row.description);
+
+    const render = () => {
+      const state = update.getState();
+      const [id, args] = updateStatusMessage(state, update);
+      document.l10n.setAttributes(row.description, id, args);
+      const working = ["checking", "downloading", "verifying", "installing"];
+      const busy = working.includes(state.phase);
+      progress.hidden = state.phase !== "downloading";
+      progress.value = state.progress;
+      checkButton.disabled = busy || !update.updatesEnabled();
+      installButton.hidden = !(
+        state.phase === "available" || state.phase === "error"
+      ) || !state.latest;
+      installButton.disabled = busy || !update.updatesEnabled();
+      if (state.latest) {
+        document.l10n.setAttributes(installButton, "komorebi-update-install", {
+          latest: state.latest.version,
+        });
+      }
+    };
+    update.onChange(render);
+    settingsSync.push(render);
+    render();
+    return row;
   }
 
   function createBrowserPage() {
@@ -1894,18 +2223,14 @@
     return createPage(
       "browser",
       createPanel(
+        createUpdateRow(),
         createRow(
-          "komorebi-set-compact",
-          "komorebi-set-compact-description",
-          createPrefSwitch(COMPACT_PREF, false)
-        ),
-        createRow("komorebi-sleep-label", null, sleep),
-        createRow(
-          "komorebi-set-show-search",
-          null,
-          createPrefSwitch(`${NEWTAB_PREF}showSearch`, true)
+          "komorebi-update-auto",
+          "komorebi-update-auto-description",
+          createPrefSwitch("browser.komorebi.update.autoCheck", true)
         )
       ),
+      createPanel(createRow("komorebi-sleep-label", null, sleep)),
       createNote("komorebi-features-shortcuts"),
       createPanel(
         createRow("komorebi-set-setup", "komorebi-set-setup-description", setup),
@@ -2010,7 +2335,10 @@
       createAppearancePage(),
       createBrowserPage()
     );
-    main.append(head, container, closeButton);
+    notice = create("div", "komorebi-notice");
+    notice.hidden = true;
+    notice.setAttribute("role", "status");
+    main.append(head, notice, container, closeButton);
     return main;
   }
 
@@ -2030,7 +2358,16 @@
     settingsSync = [];
     const shell = create("div", "komorebi-shell");
     shell.append(createRail(), createMain());
+    const overlay = create("div", "komorebi-drop-overlay");
+    const overlayTitle = create("strong", "komorebi-drop-title");
+    document.l10n.setAttributes(overlayTitle, "komorebi-drop-title");
+    const overlayText = create("span", "komorebi-drop-text");
+    document.l10n.setAttributes(overlayText, "komorebi-drop-text");
+    overlay.append(overlayTitle, overlayText);
+    shell.appendChild(overlay);
     dialog.appendChild(shell);
+    bindDropTarget(dialog);
+    dialog.addEventListener("close", () => setDropState(false));
     document.body.appendChild(dialog);
     showPage("wallpapers");
   }
@@ -2101,6 +2438,11 @@
     IOUtils.makeDirectory(defaultPath, { createAncestors: true }).catch(
       error => console.error("Komorebi could not create the library", error)
     );
+    IOUtils.makeDirectory(global.KomorebiMedia.root(), {
+      createAncestors: true,
+    }).catch(error =>
+      console.error("Komorebi could not create the media folder", error)
+    );
 
     updateRendererSettings();
     createAppMenuButton();
@@ -2151,12 +2493,14 @@
     }
   }
 
-  function open() {
+  function open(page) {
+    // A new dialog starts on the wallpapers page, so read the target first.
+    const target = PAGES.includes(page) ? page : activePage;
     ensureDialog();
     if (!dialog.open) {
       dialog.showModal();
     }
-    showPage(activePage);
+    showPage(target);
     renderAll();
     refresh();
   }
@@ -2197,6 +2541,8 @@
     getWallpapers,
     applyWallpaper,
     addFolder: addLibrarySource,
+    addFiles,
+    addMedia,
     getCurrentFilePath: () => currentFilePath,
     toPreviewURI: toFileURI,
   };

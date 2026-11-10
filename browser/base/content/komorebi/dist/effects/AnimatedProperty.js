@@ -75,11 +75,11 @@ function sampleChannel(frames, current, fallback) {
         return fallback;
     }
     const nextIndex = frames.findIndex(frame => frame.frame >= current);
-    if (nextIndex <= 0) {
-        return frames[Math.max(nextIndex, 0)].value;
-    }
     if (nextIndex === -1) {
         return frames.at(-1).value;
+    }
+    if (nextIndex === 0) {
+        return frames[0].value;
     }
     const previous = frames[nextIndex - 1];
     const next = frames[nextIndex];

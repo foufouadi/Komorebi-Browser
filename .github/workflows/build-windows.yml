@@ -8,7 +8,7 @@ on:
         required: false
         default: ""
       version:
-        description: "Release tag, for example v0.1.0 (empty uses the run number)"
+        description: "Release tag, for example v0.1.0 (empty uses the run number). Stamped into the browser when it is compiled, so a run that reuses build_run_id keeps the version of that earlier build"
         required: false
         default: ""
 
@@ -34,6 +34,21 @@ jobs:
         shell: pwsh
         run: |
           Remove-Item -Recurse -Force "C:\Android", "C:\Program Files\dotnet", "C:\hostedtoolcache\windows\Java*" -ErrorAction SilentlyContinue
+
+      - name: Stamp the version
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          $version = $env:RELEASE_VERSION -replace '^v', ''
+          if (-not $version) { Write-Host "No version input, the source keeps its own version."; exit 0 }
+          if ($version -notmatch '^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$') { throw "Version '$env:RELEASE_VERSION' is not like v1.2.3" }
+          $file = "browser/base/content/komorebi/komorebi-update.js"
+          $source = [IO.File]::ReadAllText("$PWD/$file")
+          $stamped = [regex]::Replace($source, 'const KOMOREBI_VERSION = "[^"]*";', "const KOMOREBI_VERSION = `"$version`";")
+          if ($stamped -eq $source -and $source -notmatch "const KOMOREBI_VERSION = `"$([regex]::Escape($version))`";") { throw "KOMOREBI_VERSION was not found in $file" }
+          [IO.File]::WriteAllText("$PWD/$file", $stamped)
+          Select-String -Path $file -Pattern 'const KOMOREBI_VERSION'
 
       - name: Install MozillaBuild
         shell: pwsh
@@ -125,12 +140,24 @@ jobs:
 
       - name: Build installer
         shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
         run: |
           @'
           Unicode true
+          !ifndef APP_VERSION
+            !define APP_VERSION "0.0.0"
+          !endif
+          !include "LogicLib.nsh"
+          !include "FileFunc.nsh"
+          !insertmacro GetParameters
+          !insertmacro GetOptions
+
           Name "Komorebi Browser"
           OutFile "Komorebi-Browser-Setup.exe"
           InstallDir "$LOCALAPPDATA\Komorebi Browser"
+          ; An earlier install keeps its folder, so a reinstall lands on it.
+          InstallDirRegKey HKCU "Software\KomorebiBrowser" "InstallLocation"
           RequestExecutionLevel user
           SetCompressor /SOLID lzma
           Page directory
@@ -138,36 +165,133 @@ jobs:
           UninstPage uninstConfirm
           UninstPage instfiles
 
+          ; Set by the browser's own updater: Komorebi-Browser-Setup.exe /S /UPDATE /D=<install folder>
+          Var UpdateMode
+
+          Function .onInit
+            StrCpy $UpdateMode 0
+            ${GetParameters} $R0
+            ClearErrors
+            ${GetOptions} $R0 "/UPDATE" $R1
+            ${IfNot} ${Errors}
+              StrCpy $UpdateMode 1
+            ${EndIf}
+          FunctionEnd
+
+          ; The updater starts this installer before the browser has finished
+          ; closing. A running executable cannot be opened for writing, which
+          ; tells this install apart from any other Firefox on the machine.
+          Function WaitForBrowserExit
+            StrCpy $R0 0
+            ${Do}
+              ${IfNot} ${FileExists} "$INSTDIR\firefox.exe"
+                ${Break}
+              ${EndIf}
+              ClearErrors
+              FileOpen $R1 "$INSTDIR\firefox.exe" a
+              ${IfNot} ${Errors}
+                FileClose $R1
+                ${Break}
+              ${EndIf}
+              IntOp $R0 $R0 + 1
+              ${If} $R0 > 600
+                SetErrorLevel 3
+                Quit
+              ${EndIf}
+              Sleep 500
+            ${Loop}
+          FunctionEnd
+
+          ; Moves the app's own browser folder aside instead of deleting it, so
+          ; a locked file leaves the install untouched. Nothing else in the
+          ; install folder is removed: it may be a folder the user shares.
+          Function MoveBrowserFolderAside
+            ${IfNot} ${FileExists} "$INSTDIR\firefox.exe"
+              Return
+            ${EndIf}
+            ${IfNot} ${FileExists} "$INSTDIR\browser\omni.ja"
+              Return
+            ${EndIf}
+            RMDir /r "$INSTDIR\browser.old"
+            StrCpy $R0 0
+            ${Do}
+              ClearErrors
+              Rename "$INSTDIR\browser" "$INSTDIR\browser.old"
+              ${IfNot} ${Errors}
+                ${Break}
+              ${EndIf}
+              IntOp $R0 $R0 + 1
+              ${If} $R0 > 40
+                SetErrorLevel 4
+                Quit
+              ${EndIf}
+              Sleep 500
+            ${Loop}
+          FunctionEnd
+
           Section "Install"
+            ${If} $UpdateMode == 1
+              Call WaitForBrowserExit
+              Call MoveBrowserFolderAside
+            ${EndIf}
             SetOutPath "$INSTDIR"
             File /r "ROOTDIR\*.*"
+            ${If} $UpdateMode == 1
+              RMDir /r "$INSTDIR\browser.old"
+            ${EndIf}
             WriteUninstaller "$INSTDIR\Uninstall.exe"
-            CreateShortcut "$DESKTOP\Komorebi Browser.lnk" "$INSTDIR\firefox.exe"
-            CreateDirectory "$SMPROGRAMS\Komorebi Browser"
-            CreateShortcut "$SMPROGRAMS\Komorebi Browser\Komorebi Browser.lnk" "$INSTDIR\firefox.exe"
+            ${If} $UpdateMode != 1
+              CreateShortcut "$DESKTOP\Komorebi Browser.lnk" "$INSTDIR\firefox.exe"
+              CreateDirectory "$SMPROGRAMS\Komorebi Browser"
+              CreateShortcut "$SMPROGRAMS\Komorebi Browser\Komorebi Browser.lnk" "$INSTDIR\firefox.exe"
+            ${EndIf}
+            WriteRegStr HKCU "Software\KomorebiBrowser" "InstallLocation" "$INSTDIR"
             WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\KomorebiBrowser" "DisplayName" "Komorebi Browser"
+            WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\KomorebiBrowser" "DisplayVersion" "${APP_VERSION}"
+            WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\KomorebiBrowser" "InstallLocation" "$INSTDIR"
             WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\KomorebiBrowser" "UninstallString" "$INSTDIR\Uninstall.exe"
+            ${If} $UpdateMode == 1
+              Exec '"$INSTDIR\firefox.exe"'
+            ${EndIf}
           SectionEnd
 
           Section "Uninstall"
             Delete "$DESKTOP\Komorebi Browser.lnk"
             RMDir /r "$SMPROGRAMS\Komorebi Browser"
-            RMDir /r "$INSTDIR"
+            ; Only what the installer put there. The folder may be shared, so
+            ; it is removed only once it is empty.
+            !include "uninstall-files.nsh"
+            Delete "$INSTDIR\Uninstall.exe"
+            RMDir "$INSTDIR"
             DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\KomorebiBrowser"
+            DeleteRegKey HKCU "Software\KomorebiBrowser"
           SectionEnd
           '@ | Set-Content -Encoding utf8 installer.nsi
           $root = (Get-ChildItem stage -Recurse -Filter firefox.exe | Select-Object -First 1).DirectoryName
           if (-not $root) { throw "firefox.exe not found in package" }
           Write-Host "Package root: $root"
           (Get-Content installer.nsi -Raw).Replace('ROOTDIR', $root) | Set-Content -Encoding utf8 installer.nsi
-          & "C:\Program Files (x86)\NSIS\makensis.exe" installer.nsi
+          # What the uninstaller removes: the package's own top-level files and folders.
+          $escape = { param($name) $name.Replace('$', '$$') }
+          $lines = @()
+          $lines += Get-ChildItem $root -File | ForEach-Object { '            Delete "$INSTDIR\' + (& $escape $_.Name) + '"' }
+          $lines += Get-ChildItem $root -Directory | ForEach-Object { '            RMDir /r "$INSTDIR\' + (& $escape $_.Name) + '"' }
+          $lines | Set-Content -Encoding utf8 uninstall-files.nsh
+          $version = $env:RELEASE_VERSION -replace '^v', ''
+          if (-not $version) { $version = "0.0.0" }
+          & "C:\Program Files (x86)\NSIS\makensis.exe" "/DAPP_VERSION=$version" installer.nsi
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Get-Item Komorebi-Browser-Setup.exe | Select-Object Name, Length
+          $hash = (Get-FileHash Komorebi-Browser-Setup.exe -Algorithm SHA256).Hash.ToLower()
+          [IO.File]::WriteAllText("$PWD/Komorebi-Browser-Setup.exe.sha256", "$hash  Komorebi-Browser-Setup.exe`n")
+          Get-Content Komorebi-Browser-Setup.exe.sha256
 
       - uses: actions/upload-artifact@v4
         with:
           name: Komorebi-Browser-Setup
-          path: Komorebi-Browser-Setup.exe
+          path: |
+            Komorebi-Browser-Setup.exe
+            Komorebi-Browser-Setup.exe.sha256
           compression-level: 0
 
       - name: Publish release
@@ -176,11 +300,15 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_VERSION: ${{ inputs.version }}
         run: |
+          # Unversioned builds are prereleases so they never count as the
+          # "latest" release the in-browser updater looks at.
+          $flags = @()
           if ($env:RELEASE_VERSION) {
             $tag = $env:RELEASE_VERSION
             $title = "Komorebi Browser $tag (Windows x64)"
           } else {
             $tag = "windows-build-$env:GITHUB_RUN_NUMBER"
             $title = "Komorebi Browser (Windows x64) #$env:GITHUB_RUN_NUMBER"
+            $flags += "--prerelease"
           }
-          gh release create $tag Komorebi-Browser-Setup.exe --repo $env:GITHUB_REPOSITORY --title $title --notes "Download and run Komorebi-Browser-Setup.exe." --target $env:GITHUB_SHA
+          gh release create $tag Komorebi-Browser-Setup.exe Komorebi-Browser-Setup.exe.sha256 --repo $env:GITHUB_REPOSITORY --title $title --notes "Download and run Komorebi-Browser-Setup.exe. Komorebi-Browser-Setup.exe.sha256 is its SHA-256." --target $env:GITHUB_SHA @flags

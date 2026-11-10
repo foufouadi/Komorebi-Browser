@@ -24,7 +24,17 @@
     "https://addons.mozilla.org/firefox/downloads/latest/ublock-origin/latest.xpi";
   const MAX_WALLPAPERS = 12;
   const CLOSE_DELAY_MS = 220;
-  const STEPS = ["welcome", "wallpapers", "layout", "search", "privacy", "done"];
+  const STEPS = [
+    "welcome",
+    "import",
+    "wallpapers",
+    "layout",
+    "search",
+    "privacy",
+    "done",
+  ];
+  const IMPORT_SOURCES = ["chrome", "firefox"];
+  const IMPORT_WAIT_MS = 60000;
 
   const lazy = {};
   ChromeUtils.defineESModuleGetters(lazy, {
@@ -43,6 +53,9 @@
   let finished = false;
   let backdrops = [];
   let backdropToken = 0;
+  let steps = STEPS;
+  let importState = null;
+  let opening = false;
 
   function showBackdrop(uri) {
     if (!backdrops.length) {
@@ -229,6 +242,144 @@
     ];
   }
 
+  function newImportState(sources) {
+    const state = { chromeJob: null, firefoxQueued: false, sources };
+    for (const key of IMPORT_SOURCES) {
+      state[key] = {
+        enabled: Boolean(sources[key]),
+        profile: sources[key]?.defaultId,
+      };
+    }
+    return state;
+  }
+
+  function buildImportSource(key) {
+    const source = importState.sources[key];
+    const choice = importState[key];
+    const item = create("div", "komorebi-onb-source");
+    const label = create("label", "komorebi-onb-source-label");
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = choice.enabled;
+    checkbox.addEventListener("change", () => {
+      choice.enabled = checkbox.checked;
+      item.classList.toggle("off", !checkbox.checked);
+    });
+    const name = create("span", "komorebi-onb-source-text");
+    name.append(
+      text("strong", `komorebi-onb-import-${key}`, "komorebi-onb-source-name"),
+      text("span", `komorebi-onb-import-${key}-description`, "komorebi-onb-note")
+    );
+    label.append(checkbox, name);
+    item.appendChild(label);
+
+    if (source.profiles.length > 1) {
+      const select = document.createElement("select");
+      select.className = "komorebi-onb-source-profile";
+      document.l10n.setAttributes(select, "komorebi-onb-import-profile");
+      for (const profile of source.profiles) {
+        const option = document.createElement("option");
+        option.value = profile.id;
+        option.textContent = profile.name;
+        select.appendChild(option);
+      }
+      select.value = choice.profile;
+      select.addEventListener("change", () => {
+        choice.profile = select.value;
+      });
+      item.appendChild(select);
+    }
+    if (source.running) {
+      item.appendChild(
+        text("p", `komorebi-onb-import-${key}-open`, "komorebi-onb-source-warning")
+      );
+    }
+    return item;
+  }
+
+  function buildImport() {
+    const step = create("div", "komorebi-onb-step");
+    const list = create("div", "komorebi-onb-sources");
+    for (const key of IMPORT_SOURCES) {
+      if (importState.sources[key]) {
+        list.appendChild(buildImportSource(key));
+      }
+    }
+    step.append(
+      text("h1", "komorebi-onb-import-title", "komorebi-onb-title"),
+      text("p", "komorebi-onb-import-lead", "komorebi-onb-lead"),
+      list,
+      text("p", "komorebi-onb-import-note", "komorebi-onb-note")
+    );
+    return step;
+  }
+
+  // Runs when the user confirms the import step. Chrome copies in the
+  // background; Firefox waits for the restart that ends the introduction.
+  function startImports() {
+    const chrome = importState.chrome;
+    if (
+      chrome.enabled &&
+      importState.sources.chrome &&
+      importState.chromeJob?.profile !== chrome.profile
+    ) {
+      const job = { profile: chrome.profile, state: "running" };
+      importState.chromeJob = job;
+      const profile = importState.sources.chrome.profiles.find(
+        item => item.id === chrome.profile
+      );
+      job.promise = global.KomorebiImport.importFromChrome(profile).then(
+        counts => {
+          job.state = "done";
+          job.counts = counts;
+        },
+        error => {
+          console.error("Komorebi could not import from Chrome", error);
+          job.state = "failed";
+        }
+      );
+    }
+    importState.firefoxQueued =
+      importState.firefox.enabled && Boolean(importState.sources.firefox);
+  }
+
+  function importStatusLines() {
+    const lines = [];
+    const job = importState?.chromeJob;
+    if (job) {
+      lines.push(`komorebi-onb-import-chrome-${job.state}`);
+    }
+    if (importState?.firefoxQueued) {
+      lines.push("komorebi-onb-import-firefox-pending");
+    }
+    return lines;
+  }
+
+  function renderImportStatus(container) {
+    const draw = () =>
+      container.replaceChildren(
+        ...importStatusLines().map(id => text("p", id, "komorebi-onb-note"))
+      );
+    draw();
+    // The copy may still be running: draw again once it has settled.
+    importState?.chromeJob?.promise?.then(() => {
+      if (container.isConnected) {
+        draw();
+      }
+    });
+  }
+
+  async function finishImports() {
+    const restart = importState?.firefoxQueued;
+    await Promise.race([
+      importState?.chromeJob?.promise,
+      new Promise(resolve => window.setTimeout(resolve, IMPORT_WAIT_MS)),
+    ]);
+    if (restart) {
+      global.KomorebiImport.restartIntoFirefoxImport();
+    }
+  }
+
   function buildLayout() {
     const step = create("div", "komorebi-onb-step");
     const vertical = Services.prefs.getBoolPref(VERTICAL_PREF, false);
@@ -351,9 +502,13 @@
         global.KomorebiLibrary.open();
       })
     );
+    const status = create("div", "komorebi-onb-import-status");
+    status.setAttribute("aria-live", "polite");
+    renderImportStatus(status);
     step.append(
       text("h1", "komorebi-onb-done-title", "komorebi-onb-title"),
       text("p", "komorebi-onb-done-text", "komorebi-onb-lead"),
+      status,
       actions
     );
     return step;
@@ -361,6 +516,7 @@
 
   const BUILDERS = {
     welcome: buildWelcome,
+    import: buildImport,
     wallpapers: buildWallpapers,
     layout: buildLayout,
     search: buildSearch,
@@ -370,25 +526,27 @@
 
   function showStep(next, direction = 1) {
     index = next;
-    const step = BUILDERS[STEPS[index]]();
+    const step = BUILDERS[steps[index]]();
     step.dataset.direction = direction > 0 ? "forward" : "back";
     stage.replaceChildren(step);
     dots.forEach((dot, dotIndex) => {
       dot.classList.toggle("active", dotIndex === index);
       dot.classList.toggle("done", dotIndex < index);
     });
-    const last = index === STEPS.length - 1;
+    const last = index === steps.length - 1;
     backButton.hidden = index === 0;
     skipButton.hidden = last;
     document.l10n.setAttributes(
       nextButton,
       last
-        ? "komorebi-onb-finish"
+        ? importState?.firefoxQueued
+          ? "komorebi-onb-finish-restart"
+          : "komorebi-onb-finish"
         : index === 0
           ? "komorebi-onb-start"
           : "komorebi-onb-next"
     );
-    dialog.dataset.step = STEPS[index];
+    dialog.dataset.step = steps[index];
     const heading = step.querySelector("h1");
     heading.tabIndex = -1;
     heading.focus({ preventScroll: true });
@@ -403,6 +561,9 @@
     const closing = dialog;
     closing?.classList.add("closing");
     window.setTimeout(() => closing?.close(), CLOSE_DELAY_MS);
+    finishImports().catch(error =>
+      console.error("Komorebi could not finish the import", error)
+    );
   }
 
   async function showButtonHint() {
@@ -475,18 +636,21 @@
 
     const dotList = create("div", "komorebi-onb-dots");
     document.l10n.setAttributes(dotList, "komorebi-onb-progress");
-    dots = STEPS.map(() => create("span", "komorebi-onb-dot"));
+    dots = steps.map(() => create("span", "komorebi-onb-dot"));
     dotList.append(...dots);
 
     backButton = button("komorebi-onb-back", () => showStep(index - 1, -1));
     nextButton = button(
       "komorebi-onb-next",
       () => {
-        if (index === STEPS.length - 1) {
+        if (index === steps.length - 1) {
           complete();
-        } else {
-          showStep(index + 1);
+          return;
         }
+        if (steps[index] === "import") {
+          startImports();
+        }
+        showStep(index + 1);
       },
       "primary"
     );
@@ -504,11 +668,24 @@
     document.body.appendChild(dialog);
   }
 
-  function open() {
+  async function open() {
     global.MozXULElement.insertFTLIfNeeded("browser/komorebi.ftl");
-    if (dialog) {
+    if (dialog || opening) {
       return;
     }
+    opening = true;
+    try {
+      importState = newImportState(await global.KomorebiImport.detect());
+    } catch (error) {
+      console.error("Komorebi could not look for browsers to import", error);
+      importState = newImportState({});
+    }
+    opening = false;
+    steps = STEPS.filter(
+      name =>
+        name !== "import" ||
+        IMPORT_SOURCES.some(key => importState.sources[key])
+    );
     finished = false;
     ublockState = "idle";
     createDialog();

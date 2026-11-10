@@ -5,6 +5,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
+import { releaseTextFont } from "../graphics/TextRasterizer.js";
 export class ResourceManager {
     #gl;
     constructor(gl) {
@@ -15,13 +16,21 @@ export class ResourceManager {
         for (const layer of layers) {
             const releasedTextures = new Set([layer.glTexture]);
             this.#releaseMedia(layer);
+            if (layer.text) {
+                releaseTextFont(layer.text);
+            }
             gl.deleteTexture(layer.glTexture);
+            for (const texture of layer.imageTextures?.slice(1) ?? []) {
+                gl.deleteTexture(texture);
+            }
             if (layer.puppetPositionBuffer)
                 gl.deleteBuffer(layer.puppetPositionBuffer);
             if (layer.puppetEffectPositionBuffer)
                 gl.deleteBuffer(layer.puppetEffectPositionBuffer);
             if (layer.puppetTexCoordBuffer)
                 gl.deleteBuffer(layer.puppetTexCoordBuffer);
+            if (layer.puppetOutputTexCoordBuffer)
+                gl.deleteBuffer(layer.puppetOutputTexCoordBuffer);
             if (layer.puppetIndexBuffer)
                 gl.deleteBuffer(layer.puppetIndexBuffer);
             for (const pass of layer.renderPasses) {

@@ -25,6 +25,22 @@ body {
   display: block;
 }
 
+#komorebi-firefox-background {
+  position: fixed;
+  inset: 0;
+  display: none;
+  width: 100%;
+  height: 100%;
+  z-index: 0;
+  pointer-events: none;
+  object-fit: cover;
+  background: #ff9a3c;
+}
+
+:root[komorebi-firefox-background] #komorebi-firefox-background {
+  display: block;
+}
+
 #komorebi-wallpaper-host {
   position: fixed;
   inset: 0;
@@ -330,6 +346,7 @@ body {
 }
 
 .komorebi-shell {
+  position: relative;
   display: grid;
   grid-template-columns: 220px minmax(0, 1fr);
   width: 100%;
@@ -933,6 +950,114 @@ body {
 .komorebi-favorite-button.selected {
   opacity: 1;
   transform: none;
+}
+
+.komorebi-delete-button {
+  position: absolute;
+  inset-block-start: 10px;
+  inset-inline-end: 50px;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--border-radius-circle);
+  background: rgb(0 0 0 / 0.5);
+  backdrop-filter: blur(8px);
+  color: rgb(255 255 255 / 0.85);
+  opacity: 0;
+  transform: scale(0.9);
+  transition:
+    opacity var(--komorebi-duration) var(--komorebi-ease),
+    transform var(--komorebi-duration) var(--komorebi-ease),
+    background-color var(--komorebi-duration-fast) var(--komorebi-ease);
+
+  &::before {
+    content: "";
+    width: 16px;
+    height: 16px;
+    background: url("chrome://global/skin/icons/delete.svg") center / 16px no-repeat;
+    -moz-context-properties: fill;
+    fill: currentColor;
+  }
+
+  &:hover {
+    background: color-mix(in srgb, var(--text-color-error) 70%, black);
+    color: white;
+  }
+}
+
+.komorebi-wallpaper-card:is(:hover, :focus-within) .komorebi-delete-button {
+  opacity: 1;
+  transform: none;
+}
+
+/* A file added by the user without a thumbnail (a video this window could not
+   decode): a neutral tile instead of an empty frame. */
+.komorebi-wallpaper-preview-frame.empty {
+  background:
+    radial-gradient(circle at 30% 20%, color-mix(in srgb, var(--color-accent-primary) 30%, transparent), transparent 65%),
+    var(--komorebi-soft);
+}
+
+.komorebi-notice {
+  display: grid;
+  gap: 4px;
+  margin: 0 40px 12px;
+  padding: 10px 14px;
+  border: var(--border-width) solid var(--komorebi-hairline);
+  border-radius: 10px;
+  background: var(--komorebi-panel);
+
+  & p {
+    margin: 0;
+  }
+
+  & p.error {
+    color: var(--text-color-error);
+  }
+}
+
+.komorebi-drop-overlay {
+  position: absolute;
+  inset: 12px;
+  z-index: 5;
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 2px dashed var(--color-accent-primary);
+  border-radius: 20px;
+  background: color-mix(in srgb, var(--color-accent-primary) 18%, var(--komorebi-panel));
+  text-align: center;
+  pointer-events: none;
+}
+
+#komorebi-library-dialog.dropping .komorebi-drop-overlay {
+  display: flex;
+}
+
+.komorebi-drop-title {
+  font-family: var(--komorebi-serif);
+  font-size: 26px;
+  font-weight: 400;
+}
+
+.komorebi-update-control {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: end;
+  gap: 10px;
+
+  & progress {
+    width: 140px;
+    accent-color: var(--color-accent-primary);
+  }
 }
 
 .komorebi-welcome {

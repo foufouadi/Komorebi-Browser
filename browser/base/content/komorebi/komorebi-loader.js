@@ -16,12 +16,15 @@
   const MODULE_SCRIPTS = [
     "chrome://browser/content/komorebi/komorebi-host.js",
     "chrome://browser/content/komorebi/komorebi-web-renderer.js",
+    "chrome://browser/content/komorebi/komorebi-media.js",
     "chrome://browser/content/komorebi/komorebi-library.js",
     "chrome://browser/content/komorebi/komorebi-compact.js",
     "chrome://browser/content/komorebi/komorebi-spaces.js",
     "chrome://browser/content/komorebi/komorebi-sleep.js",
     "chrome://browser/content/komorebi/komorebi-search.js",
     "chrome://browser/content/komorebi/komorebi-tools.js",
+    "chrome://browser/content/komorebi/komorebi-import.js",
+    "chrome://browser/content/komorebi/komorebi-update.js",
     "chrome://browser/content/komorebi/komorebi-onboarding.js",
   ];
   const FEATURES = [
@@ -30,6 +33,7 @@
     "KomorebiSleep",
     "KomorebiSearch",
     "KomorebiTools",
+    "KomorebiUpdate",
     "KomorebiOnboarding",
   ];
   const HOME_PAGE = /^about:(?:home|newtab|welcome)(?:[?#].*)?$/;
@@ -50,6 +54,9 @@
     SEARCH_WALLPAPER_PREF,
   ]);
   const WALLPAPER_ACTIVE_PREF = "browser.komorebi.wallpaperActive";
+  const NEWTAB_WALLPAPER_PREF =
+    "browser.newtabpage.activity-stream.newtabWallpapers.wallpaper";
+  const DEFAULT_FIREFOX_WALLPAPER = "firefox-orange";
   const OPEN_LIBRARY_MESSAGE = "Komorebi:OpenLibrary";
 
   Services.prefs.setBoolPref("browser.tabs.allow_transparent_browser", true);
@@ -115,6 +122,7 @@
   let host;
   let renderers;
   let wallpaperSelected = false;
+  let firefoxBackgroundImage = null;
   const progressListener = {
     onLocationChange() {
       updatePageState();
@@ -189,14 +197,54 @@
     const audioDucked =
       prefs.getBoolPref(TAB_AUDIO_PREF, true) &&
       isTabAudioPlaying(ignoredTab?.localName === "tab" ? ignoredTab : null);
-    for (const renderer of [renderers.scene, renderers.video]) {
+    for (const renderer of [renderers.scene, renderers.video, renderers.image]) {
       renderer.setPageActive(pageActive);
       renderer.setRunning(running);
       renderer.setAudioAllowed(audioAllowed);
       renderer.setAudioDucked(audioDucked);
     }
     const root = document.documentElement;
-    root.toggleAttribute("komorebi-active", wallpaperSelected && pageActive);
+    const wallpaperVisible = wallpaperSelected && pageActive;
+    const firefoxBackground = kind === "search" && !wallpaperVisible;
+    if (firefoxBackground) {
+      showFirefoxBackground();
+    }
+    root.toggleAttribute("komorebi-firefox-background", firefoxBackground);
+    root.toggleAttribute("komorebi-active", wallpaperVisible || firefoxBackground);
+  }
+
+  async function showFirefoxBackground() {
+    if (firefoxBackgroundImage) {
+      return;
+    }
+    firefoxBackgroundImage = document.createElement("img");
+    firefoxBackgroundImage.id = "komorebi-firefox-background";
+    firefoxBackgroundImage.alt = "";
+    firefoxBackgroundImage.decoding = "async";
+    document.body.prepend(firefoxBackgroundImage);
+    try {
+      const { RemoteSettings } = ChromeUtils.importESModule(
+        "resource://services-settings/remote-settings.sys.mjs"
+      );
+      const { Utils } = ChromeUtils.importESModule(
+        "resource://services-settings/Utils.sys.mjs"
+      );
+      const wanted = Services.prefs.getStringPref(
+        NEWTAB_WALLPAPER_PREF,
+        DEFAULT_FIREFOX_WALLPAPER
+      );
+      const records = await RemoteSettings("newtab-wallpapers-v2").get();
+      const record =
+        records.find(item => item.title === wanted && item.attachment) ||
+        records.find(item => item.title === DEFAULT_FIREFOX_WALLPAPER);
+      if (record?.attachment) {
+        firefoxBackgroundImage.src =
+          (await Utils.baseAttachmentsURL()) + record.attachment.location;
+      }
+    } catch (error) {
+      // Offline or no collection yet: the fallback color stays visible.
+      console.warn("Komorebi could not load the Firefox background", error);
+    }
   }
 
   function setWallpaperSelected(selected) {
@@ -230,10 +278,12 @@
     renderers = {
       scene: host.scene,
       video: host.video,
+      image: host.image,
       web: new window.KomorebiWebRenderer(),
     };
     renderers.scene.init();
     renderers.video.init();
+    renderers.image.init();
     gBrowser.addTabsProgressListener(progressListener);
     gBrowser.tabContainer.addEventListener("TabSelect", updatePageState);
     gBrowser.tabContainer.addEventListener("TabAttrModified", tabAudioListener);

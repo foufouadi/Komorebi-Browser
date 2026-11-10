@@ -41,7 +41,6 @@
   const CUSTOMIZE_BUTTON_CLASS = "komorebi-customize-button";
   const CONTENT_SCHEME_PREF = "browser.komorebi.contentScheme";
   const WALLPAPER_ACTIVE_PREF = "browser.komorebi.wallpaperActive";
-  const SEARCH_WALLPAPER_PREF = "browser.komorebi.searchWallpaper";
   const SEARCH_OPACITY_PREF = "browser.komorebi.searchBlockOpacity";
   const DEFAULT_SEARCH_OPACITY = 70;
 
@@ -87,35 +86,18 @@
     apply();
   }
 
-  function watchWallpaperActive(doc, win, sheet, isEnabled, extraPrefs) {
+  function watchWallpaperActive(doc, win) {
     const root = doc.documentElement;
-    let sheetApplied = false;
     const apply = () => {
-      const enabled = isEnabled();
-      if (enabled !== sheetApplied) {
-        sheetApplied = enabled;
-        if (enabled) {
-          win.windowUtils.addSheet(sheet, win.windowUtils.AUTHOR_SHEET);
-        } else {
-          win.windowUtils.removeSheet(sheet, win.windowUtils.AUTHOR_SHEET);
-        }
-      }
       root.toggleAttribute(
         "komorebi-wallpaper",
-        enabled && Services.prefs.getBoolPref(WALLPAPER_ACTIVE_PREF, false)
+        Services.prefs.getBoolPref(WALLPAPER_ACTIVE_PREF, false)
       );
     };
-    const prefs = [WALLPAPER_ACTIVE_PREF, ...extraPrefs];
-    for (const pref of prefs) {
-      Services.prefs.addObserver(pref, apply);
-    }
+    Services.prefs.addObserver(WALLPAPER_ACTIVE_PREF, apply);
     win.addEventListener(
       "pagehide",
-      () => {
-        for (const pref of prefs) {
-          Services.prefs.removeObserver(pref, apply);
-        }
-      },
+      () => Services.prefs.removeObserver(WALLPAPER_ACTIVE_PREF, apply),
       { once: true }
     );
     apply();
@@ -156,17 +138,13 @@
       return;
     }
     if (isAbout) {
-      watchWallpaperActive(doc, win, aboutSheet, () => true, []);
+      win.windowUtils.addSheet(aboutSheet, win.windowUtils.AUTHOR_SHEET);
+      watchWallpaperActive(doc, win);
       watchCustomizePanel(doc, win);
       watchContentScheme(doc, win);
     } else {
-      watchWallpaperActive(
-        doc,
-        win,
-        googleSheet,
-        () => Services.prefs.getStringPref(SEARCH_WALLPAPER_PREF, "full") !== "off",
-        [SEARCH_WALLPAPER_PREF]
-      );
+      win.windowUtils.addSheet(googleSheet, win.windowUtils.AUTHOR_SHEET);
+      doc.documentElement.setAttribute("komorebi-wallpaper", "");
       watchSearchOpacity(doc, win);
     }
   }
