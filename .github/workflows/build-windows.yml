@@ -72,6 +72,7 @@ jobs:
           ac_add_options --without-wasm-sandboxed-libraries
           ac_add_options --with-branding=browser/branding/komorebi
           ac_add_options MOZ_APP_PROFILE=Komorebi
+          ac_add_options --with-app-name=komorebi
           mk_add_options MOZ_OBJDIR=@TOPSRCDIR@/obj-komorebi
           '@ | Set-Content -Encoding ascii .mozconfig
           @'
@@ -99,13 +100,13 @@ jobs:
         shell: pwsh
         run: |
           Get-ChildItem obj-komorebi\dist -File | Select-Object Name, Length
-          $zip = Get-ChildItem obj-komorebi\dist\firefox-*.win64.zip | Where-Object { $_.Name -notmatch 'xpt_artifacts|symbols|tests|mozinfo' } | Select-Object -First 1
+          $zip = Get-ChildItem obj-komorebi\dist\komorebi-*.win64.zip | Where-Object { $_.Name -notmatch 'xpt_artifacts|symbols|tests|mozinfo' } | Select-Object -First 1
           if (-not $zip) { throw "package zip not found" }
           Add-Type -AssemblyName System.IO.Compression.FileSystem
           $z = [System.IO.Compression.ZipFile]::OpenRead($zip.FullName)
-          $hasExe = $z.Entries | Where-Object { $_.Name -eq 'firefox.exe' }
+          $hasExe = $z.Entries | Where-Object { $_.Name -eq 'komorebi.exe' }
           $z.Dispose()
-          if (-not $hasExe) { throw "$($zip.Name) does not contain firefox.exe" }
+          if (-not $hasExe) { throw "$($zip.Name) does not contain komorebi.exe" }
           Write-Host "Using $($zip.Name)"
           Copy-Item $zip.FullName Komorebi-Browser-win64.zip
 
@@ -189,14 +190,19 @@ jobs:
           ; The updater starts this installer before the browser has finished
           ; closing. A running executable cannot be opened for writing, which
           ; tells this install apart from any other Firefox on the machine.
+          ; Versions before 0.2.1 ran firefox.exe from the same folder.
           Function WaitForBrowserExit
+            StrCpy $R2 "$INSTDIR\komorebi.exe"
+            ${IfNot} ${FileExists} $R2
+              StrCpy $R2 "$INSTDIR\firefox.exe"
+            ${EndIf}
             StrCpy $R0 0
             ${Do}
-              ${IfNot} ${FileExists} "$INSTDIR\firefox.exe"
+              ${IfNot} ${FileExists} $R2
                 ${Break}
               ${EndIf}
               ClearErrors
-              FileOpen $R1 "$INSTDIR\firefox.exe" a
+              FileOpen $R1 $R2 a
               ${IfNot} ${Errors}
                 FileClose $R1
                 ${Break}
@@ -214,7 +220,8 @@ jobs:
           ; a locked file leaves the install untouched. Nothing else in the
           ; install folder is removed: it may be a folder the user shares.
           Function MoveBrowserFolderAside
-            ${IfNot} ${FileExists} "$INSTDIR\firefox.exe"
+            ${IfNot} ${FileExists} "$INSTDIR\komorebi.exe"
+            ${AndIfNot} ${FileExists} "$INSTDIR\firefox.exe"
               Return
             ${EndIf}
             ${IfNot} ${FileExists} "$INSTDIR\browser\omni.ja"
@@ -247,20 +254,32 @@ jobs:
             ${If} $UpdateMode == 1
               RMDir /r "$INSTDIR\browser.old"
             ${EndIf}
+            ; Only a folder an earlier Komorebi was installed to, never a real Firefox.
+            ReadRegStr $R3 HKCU "Software\KomorebiBrowser" "InstallLocation"
+            ${If} ${FileExists} "$INSTDIR\firefox.exe"
+            ${AndIf} $R3 == $INSTDIR
+              Delete "$INSTDIR\firefox.exe"
+              ${If} ${FileExists} "$DESKTOP\Komorebi Browser.lnk"
+                CreateShortcut "$DESKTOP\Komorebi Browser.lnk" "$INSTDIR\komorebi.exe"
+              ${EndIf}
+              ${If} ${FileExists} "$SMPROGRAMS\Komorebi Browser\Komorebi Browser.lnk"
+                CreateShortcut "$SMPROGRAMS\Komorebi Browser\Komorebi Browser.lnk" "$INSTDIR\komorebi.exe"
+              ${EndIf}
+            ${EndIf}
             WriteUninstaller "$INSTDIR\Uninstall.exe"
             ${If} $UpdateMode != 1
-              CreateShortcut "$DESKTOP\Komorebi Browser.lnk" "$INSTDIR\firefox.exe"
+              CreateShortcut "$DESKTOP\Komorebi Browser.lnk" "$INSTDIR\komorebi.exe"
               CreateDirectory "$SMPROGRAMS\Komorebi Browser"
-              CreateShortcut "$SMPROGRAMS\Komorebi Browser\Komorebi Browser.lnk" "$INSTDIR\firefox.exe"
+              CreateShortcut "$SMPROGRAMS\Komorebi Browser\Komorebi Browser.lnk" "$INSTDIR\komorebi.exe"
             ${EndIf}
             WriteRegStr HKCU "Software\KomorebiBrowser" "InstallLocation" "$INSTDIR"
             WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\KomorebiBrowser" "DisplayName" "Komorebi Browser"
             WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\KomorebiBrowser" "DisplayVersion" "${APP_VERSION}"
-            WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\KomorebiBrowser" "DisplayIcon" "$INSTDIR\firefox.exe,0"
+            WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\KomorebiBrowser" "DisplayIcon" "$INSTDIR\komorebi.exe,0"
             WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\KomorebiBrowser" "InstallLocation" "$INSTDIR"
             WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\KomorebiBrowser" "UninstallString" "$INSTDIR\Uninstall.exe"
             ${If} $UpdateMode == 1
-              Exec '"$INSTDIR\firefox.exe"'
+              Exec '"$INSTDIR\komorebi.exe"'
             ${EndIf}
           SectionEnd
 
@@ -276,8 +295,8 @@ jobs:
             DeleteRegKey HKCU "Software\KomorebiBrowser"
           SectionEnd
           '@ | Set-Content -Encoding utf8 installer.nsi
-          $root = (Get-ChildItem stage -Recurse -Filter firefox.exe | Select-Object -First 1).DirectoryName
-          if (-not $root) { throw "firefox.exe not found in package" }
+          $root = (Get-ChildItem stage -Recurse -Filter komorebi.exe | Select-Object -First 1).DirectoryName
+          if (-not $root) { throw "komorebi.exe not found in package" }
           Write-Host "Package root: $root"
           (Get-Content installer.nsi -Raw).Replace('ROOTDIR', $root) | Set-Content -Encoding utf8 installer.nsi
           # What the uninstaller removes: the package's own top-level files and folders.
