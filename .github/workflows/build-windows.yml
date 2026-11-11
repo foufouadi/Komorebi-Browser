@@ -71,6 +71,7 @@ jobs:
           ac_add_options --disable-bits-download
           ac_add_options --without-wasm-sandboxed-libraries
           ac_add_options --with-branding=browser/branding/komorebi
+          ac_add_options MOZ_APP_PROFILE=Komorebi
           mk_add_options MOZ_OBJDIR=@TOPSRCDIR@/obj-komorebi
           '@ | Set-Content -Encoding ascii .mozconfig
           @'
@@ -132,6 +133,11 @@ jobs:
           Expand-Archive Komorebi-Browser-win64.zip -DestinationPath stage
           Get-ChildItem stage | Select-Object -First 20 Name
 
+      - uses: actions/checkout@v4
+        with:
+          path: src
+          sparse-checkout: browser/branding/komorebi
+
       - name: Install NSIS
         shell: pwsh
         run: |
@@ -154,6 +160,8 @@ jobs:
           !insertmacro GetOptions
 
           Name "Komorebi Browser"
+          Icon "src\browser\branding\komorebi\firefox.ico"
+          UninstallIcon "src\browser\branding\komorebi\firefox.ico"
           OutFile "Komorebi-Browser-Setup.exe"
           InstallDir "$LOCALAPPDATA\Komorebi Browser"
           ; An earlier install keeps its folder, so a reinstall lands on it.
@@ -248,6 +256,7 @@ jobs:
             WriteRegStr HKCU "Software\KomorebiBrowser" "InstallLocation" "$INSTDIR"
             WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\KomorebiBrowser" "DisplayName" "Komorebi Browser"
             WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\KomorebiBrowser" "DisplayVersion" "${APP_VERSION}"
+            WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\KomorebiBrowser" "DisplayIcon" "$INSTDIR\firefox.exe,0"
             WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\KomorebiBrowser" "InstallLocation" "$INSTDIR"
             WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\KomorebiBrowser" "UninstallString" "$INSTDIR\Uninstall.exe"
             ${If} $UpdateMode == 1

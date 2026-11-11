@@ -243,7 +243,7 @@
   }
 
   function newImportState(sources) {
-    const state = { chromeJob: null, firefoxQueued: false, sources };
+    const state = { chromeJob: null, firefoxJob: null, sources };
     for (const key of IMPORT_SOURCES) {
       state[key] = {
         enabled: Boolean(sources[key]),
@@ -314,43 +314,51 @@
     return step;
   }
 
-  // Runs when the user confirms the import step. Chrome copies in the
-  // background; Firefox waits for the restart that ends the introduction.
+  function importJobs() {
+    return IMPORT_SOURCES.map(key => importState?.[`${key}Job`]).filter(Boolean);
+  }
+
+  // Runs when the user confirms the import step. Each source copies in the
+  // background while the introduction goes on.
   function startImports() {
-    const chrome = importState.chrome;
-    if (
-      chrome.enabled &&
-      importState.sources.chrome &&
-      importState.chromeJob?.profile !== chrome.profile
-    ) {
-      const job = { profile: chrome.profile, state: "running" };
-      importState.chromeJob = job;
-      const profile = importState.sources.chrome.profiles.find(
-        item => item.id === chrome.profile
-      );
-      job.promise = global.KomorebiImport.importFromChrome(profile).then(
+    for (const key of IMPORT_SOURCES) {
+      const choice = importState[key];
+      const source = importState.sources[key];
+      const jobKey = `${key}Job`;
+      if (
+        !choice.enabled ||
+        !source ||
+        importState[jobKey]?.profile === choice.profile
+      ) {
+        continue;
+      }
+      const job = { profile: choice.profile, state: "running" };
+      importState[jobKey] = job;
+      const profile = source.profiles.find(item => item.id === choice.profile);
+      const run =
+        key === "chrome"
+          ? global.KomorebiImport.importFromChrome
+          : global.KomorebiImport.importFromFirefox;
+      job.promise = run(profile).then(
         counts => {
           job.state = "done";
           job.counts = counts;
         },
         error => {
-          console.error("Komorebi could not import from Chrome", error);
+          console.error(`Komorebi could not import from ${key}`, error);
           job.state = "failed";
         }
       );
     }
-    importState.firefoxQueued =
-      importState.firefox.enabled && Boolean(importState.sources.firefox);
   }
 
   function importStatusLines() {
     const lines = [];
-    const job = importState?.chromeJob;
-    if (job) {
-      lines.push(`komorebi-onb-import-chrome-${job.state}`);
-    }
-    if (importState?.firefoxQueued) {
-      lines.push("komorebi-onb-import-firefox-pending");
+    for (const key of IMPORT_SOURCES) {
+      const job = importState?.[`${key}Job`];
+      if (job) {
+        lines.push(`komorebi-onb-import-${key}-${job.state}`);
+      }
     }
     return lines;
   }
@@ -362,7 +370,7 @@
       );
     draw();
     // The copy may still be running: draw again once it has settled.
-    importState?.chromeJob?.promise?.then(() => {
+    Promise.all(importJobs().map(job => job.promise)).then(() => {
       if (container.isConnected) {
         draw();
       }
@@ -370,14 +378,10 @@
   }
 
   async function finishImports() {
-    const restart = importState?.firefoxQueued;
     await Promise.race([
-      importState?.chromeJob?.promise,
+      Promise.all(importJobs().map(job => job.promise)),
       new Promise(resolve => window.setTimeout(resolve, IMPORT_WAIT_MS)),
     ]);
-    if (restart) {
-      global.KomorebiImport.restartIntoFirefoxImport();
-    }
   }
 
   function buildLayout() {
@@ -539,9 +543,7 @@
     document.l10n.setAttributes(
       nextButton,
       last
-        ? importState?.firefoxQueued
-          ? "komorebi-onb-finish-restart"
-          : "komorebi-onb-finish"
+        ? "komorebi-onb-finish"
         : index === 0
           ? "komorebi-onb-start"
           : "komorebi-onb-next"
@@ -706,7 +708,16 @@
     if (Services.prefs.getBoolPref(ONBOARDED_PREF, false)) {
       return;
     }
+    const firstWindow =
+      Array.from(Services.wm.getEnumerator("navigator:browser")).length === 1;
     await window.delayedStartupPromise;
+    if (
+      firstWindow &&
+      !window.browsingContext.usePrivateBrowsing &&
+      (await global.KomorebiImport.adoptPreviousProfile())
+    ) {
+      return;
+    }
     await new Promise(resolve =>
       window.requestIdleCallback(resolve, { timeout: 2000 })
     );
