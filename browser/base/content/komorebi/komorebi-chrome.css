@@ -225,7 +225,7 @@ body {
   --tab-selected-textcolor: var(--komorebi-text, CanvasText);
   --tab-background-color-selected: color-mix(in srgb, var(--komorebi-text, CanvasText) 16%, transparent);
   --toolbar-field-background-color: color-mix(in srgb, var(--komorebi-text, CanvasText) 10%, transparent);
-  --toolbar-field-background-color-focus: color-mix(in srgb, var(--komorebi-tint, Canvas) 90%, var(--komorebi-text, CanvasText));
+  --toolbar-field-background-color-focus: Canvas;
   --toolbar-field-text-color: var(--komorebi-text, CanvasText);
   --toolbar-field-text-color-focus: var(--komorebi-text, CanvasText);
   --toolbar-field-border-color: transparent;

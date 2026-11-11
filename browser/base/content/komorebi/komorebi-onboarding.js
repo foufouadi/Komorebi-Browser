@@ -705,11 +705,16 @@
   }
 
   async function init() {
+    const firstWindow =
+      Array.from(Services.wm.getEnumerator("navigator:browser")).length === 1;
+    if (firstWindow && AppConstants.platform == "win") {
+      window.delayedStartupPromise.then(() =>
+        global.KomorebiImport.tagShortcuts()
+      );
+    }
     if (Services.prefs.getBoolPref(ONBOARDED_PREF, false)) {
       return;
     }
-    const firstWindow =
-      Array.from(Services.wm.getEnumerator("navigator:browser")).length === 1;
     await window.delayedStartupPromise;
     if (
       firstWindow &&

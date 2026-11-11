@@ -30,6 +30,14 @@
   const HISTORY_MAX_URLS = 20000;
   const HISTORY_BATCH = 500;
   const IMPORT_FOLDER_TITLE = "Imported from Firefox";
+  const INSTALL_KEY = "Software\\KomorebiBrowser";
+  const SHORTCUT_NAME = "Komorebi Browser";
+  // [shortcut folder, directory service key, path inside it], as the installer
+  // creates them.
+  const SHORTCUTS = [
+    ["Programs", "Progs", "Komorebi Browser\\Komorebi Browser.lnk"],
+    ["Desktop", "Desk", "Komorebi Browser.lnk"],
+  ];
 
   const lazy = {};
   ChromeUtils.defineESModuleGetters(lazy, {
@@ -334,11 +342,11 @@
        JOIN (
          SELECT id, url, title FROM moz_places
          WHERE last_visit_date > :since
-           AND (url LIKE 'http://%' OR url LIKE 'https://%')
+           AND (url LIKE :http OR url LIKE :https)
          ORDER BY last_visit_date DESC LIMIT :cap
        ) p ON p.id = v.place_id
        WHERE v.visit_date > :since`,
-      { since, cap: HISTORY_MAX_URLS },
+      { since, cap: HISTORY_MAX_URLS, http: "http://%", https: "https://%" },
       row => {
         const url = row.getResultByName("url");
         let page = pages.get(url);
@@ -365,10 +373,73 @@
     return all.length;
   }
 
+  async function openCopy(root, leafName, temp) {
+    const source = PathUtils.join(root, leafName);
+    const copy = PathUtils.join(temp, leafName);
+    await IOUtils.copy(source, copy);
+    if (await IOUtils.exists(`${source}-wal`)) {
+      await IOUtils.copy(`${source}-wal`, `${copy}-wal`);
+    }
+    return lazy.Sqlite.openConnection({ path: copy, readOnly: true });
+  }
+
+  // Firefox stored cookie expiry in seconds before schema 16.
+  const COOKIES_MS_SCHEMA = 16;
+
+  async function importCookiesFromDatabase(db) {
+    const version = await db.getSchemaVersion();
+    const columns = new Set(
+      (await db.execute("PRAGMA table_info(moz_cookies)")).map(row =>
+        row.getResultByName("name")
+      )
+    );
+    const optional = (row, name, fallback) =>
+      columns.has(name) ? (row.getResultByName(name) ?? fallback) : fallback;
+    const now = Date.now();
+    let count = 0;
+    const rows = await db.execute("SELECT * FROM moz_cookies");
+    for (const row of rows) {
+      let expiry = row.getResultByName("expiry");
+      if (version < COOKIES_MS_SCHEMA) {
+        expiry *= 1000;
+      }
+      if (expiry <= now) {
+        continue;
+      }
+      try {
+        const originAttributes =
+          ChromeUtils.CreateOriginAttributesFromOriginSuffix(
+            row.getResultByName("originAttributes") || ""
+          );
+        const result = Services.cookies.add(
+          row.getResultByName("host"),
+          row.getResultByName("path"),
+          row.getResultByName("name"),
+          row.getResultByName("value"),
+          !!row.getResultByName("isSecure"),
+          !!row.getResultByName("isHttpOnly"),
+          false,
+          expiry,
+          originAttributes,
+          optional(row, "sameSite", Ci.nsICookie.SAMESITE_NONE),
+          optional(row, "schemeMap", Ci.nsICookie.SCHEME_UNSET),
+          !!optional(row, "isPartitionedAttributeSet", 0)
+        );
+        if (result.result == Ci.nsICookieValidation.eOK) {
+          count++;
+        }
+      } catch (error) {
+        console.error("Komorebi skipped a Firefox cookie", error);
+      }
+    }
+    return count;
+  }
+
   /**
-   * Copies the bookmarks and history of a Firefox profile into this one. The
-   * profile is only read: the database is opened from a temporary copy.
-   * Passwords are not copied, Firefox encrypts them with its own key.
+   * Copies the bookmarks, history and cookies of a Firefox profile into this
+   * one, so sites stay signed in. The profile is only read: the databases are
+   * opened from temporary copies. Passwords are not copied, Firefox encrypts
+   * them with its own key.
    *
    * @param {{id: string}} profile
    *   An entry of the profiles listed by detectFirefox().
@@ -392,18 +463,10 @@
       PathUtils.tempDir,
       `komorebi-firefox-${Date.now()}`
     );
-    const counts = { bookmarks: 0, history: 0 };
+    const counts = { bookmarks: 0, history: 0, cookies: 0 };
     await IOUtils.makeDirectory(temp);
     try {
-      const copy = PathUtils.join(temp, "places.sqlite");
-      await IOUtils.copy(source, copy);
-      if (await IOUtils.exists(`${source}-wal`)) {
-        await IOUtils.copy(`${source}-wal`, `${copy}-wal`);
-      }
-      const db = await lazy.Sqlite.openConnection({
-        path: copy,
-        readOnly: true,
-      });
+      const db = await openCopy(root, "places.sqlite", temp);
       try {
         onProgress("bookmarks");
         let imported = false;
@@ -425,6 +488,19 @@
         counts.history = await importHistoryFromDatabase(db);
       } finally {
         await db.close();
+      }
+      if (await IOUtils.exists(PathUtils.join(root, "cookies.sqlite"))) {
+        onProgress("cookies");
+        try {
+          const cookies = await openCopy(root, "cookies.sqlite", temp);
+          try {
+            counts.cookies = await importCookiesFromDatabase(cookies);
+          } finally {
+            await cookies.close();
+          }
+        } catch (error) {
+          console.error("Komorebi could not copy the Firefox cookies", error);
+        }
       }
     } finally {
       await IOUtils.remove(temp, { recursive: true, ignoreAbsent: true }).catch(
@@ -593,6 +669,65 @@
     }
   }
 
+  function installLocation() {
+    const key = Cc["@mozilla.org/windows-registry-key;1"].createInstance(
+      Ci.nsIWindowsRegKey
+    );
+    try {
+      key.open(key.ROOT_KEY_CURRENT_USER, INSTALL_KEY, key.ACCESS_READ);
+      return key.readStringValue("InstallLocation");
+    } catch {
+      return null;
+    } finally {
+      key.close();
+    }
+  }
+
+  /**
+   * The taskbar takes its icon from a shortcut carrying the window's
+   * AppUserModelID. The installer cannot write that ID, so the installed
+   * browser adds it to its own shortcuts on first run.
+   */
+  async function tagShortcuts() {
+    try {
+      const exe = Services.dirsvc.get("XREExeF", Ci.nsIFile);
+      const location = installLocation();
+      if (!location || !samePath(location, exe.parent.path)) {
+        return;
+      }
+      const aumid = Cc["@mozilla.org/windows-taskbar;1"].getService(
+        Ci.nsIWinTaskbar
+      ).defaultGroupId;
+      const shell = Cc["@mozilla.org/browser/shell-service;1"].getService(
+        Ci.nsIWindowsShellService
+      );
+      if ((await shell.enumerateInstallShortcuts(aumid)).length) {
+        return;
+      }
+      for (const [folder, directoryKey, relativePath] of SHORTCUTS) {
+        const parts = relativePath.split("\\");
+        const path = PathUtils.join(
+          Services.dirsvc.get(directoryKey, Ci.nsIFile).path,
+          ...parts
+        );
+        if (await IOUtils.exists(path)) {
+          await shell.createShortcut(
+            exe,
+            [],
+            SHORTCUT_NAME,
+            exe,
+            0,
+            aumid,
+            folder,
+            relativePath
+          );
+        }
+      }
+    } catch (error) {
+      console.error("Komorebi could not tag its shortcuts", error);
+    }
+  }
+
   global.KomorebiImport = {
     adoptPreviousProfile,
     detect,
@@ -600,5 +735,6 @@
     importFromFirefox,
     providers,
     runDetachedScript,
+    tagShortcuts,
   };
 })(this);
